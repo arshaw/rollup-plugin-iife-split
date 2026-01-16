@@ -1,9 +1,9 @@
 import MagicString from 'magic-string';
-import * as acorn from 'acorn';
 import { walk } from 'estree-walker';
 import type { OutputChunk } from 'rollup';
 import type { Node, ExportNamedDeclaration, ExportDefaultDeclaration, Identifier, Program, VariableDeclaration, FunctionDeclaration, ClassDeclaration } from 'estree';
 import { SHARED_CHUNK_NAME } from './chunk-analyzer';
+import type { ParseFn } from './types';
 
 interface ExportMapping {
   exportedName: string;
@@ -19,11 +19,8 @@ interface ExportInfo {
  * Extracts all top-level declaration names from code.
  * This includes variables, functions, and classes at the module scope.
  */
-function extractTopLevelDeclarations(code: string): Set<string> {
-  const ast = acorn.parse(code, {
-    ecmaVersion: 'latest',
-    sourceType: 'module'
-  }) as Program;
+function extractTopLevelDeclarations(code: string, parse: ParseFn): Set<string> {
+  const ast = parse(code);
 
   const declarations = new Set<string>();
 
@@ -77,13 +74,10 @@ function extractTopLevelDeclarations(code: string): Set<string> {
  * Renames identifiers in code based on a rename map.
  * Handles all identifier references, not just declarations.
  */
-function renameIdentifiers(code: string, renameMap: Map<string, string>): string {
+function renameIdentifiers(code: string, renameMap: Map<string, string>, parse: ParseFn): string {
   if (renameMap.size === 0) return code;
 
-  const ast = acorn.parse(code, {
-    ecmaVersion: 'latest',
-    sourceType: 'module'
-  }) as Node;
+  const ast = parse(code) as Node;
 
   const s = new MagicString(code);
 
@@ -102,11 +96,8 @@ function renameIdentifiers(code: string, renameMap: Map<string, string>): string
   return s.toString();
 }
 
-function extractExports(code: string): ExportInfo {
-  const ast = acorn.parse(code, {
-    ecmaVersion: 'latest',
-    sourceType: 'module'
-  }) as Node;
+function extractExports(code: string, parse: ParseFn): ExportInfo {
+  const ast = parse(code) as Node;
 
   const exports: ExportMapping[] = [];
   let hasDefault = false;
@@ -155,11 +146,8 @@ function extractExports(code: string): ExportInfo {
   return { exports, hasDefault };
 }
 
-function stripExports(code: string): string {
-  const ast = acorn.parse(code, {
-    ecmaVersion: 'latest',
-    sourceType: 'module'
-  }) as Node;
+function stripExports(code: string, parse: ParseFn): string {
+  const ast = parse(code) as Node;
 
   const s = new MagicString(code);
 
@@ -220,12 +208,10 @@ interface ImportInfo {
 function removeSharedImportsAndRewriteRefs(
   code: string,
   sharedChunkFileName: string,
-  sharedExportToLocal: Map<string, string>
+  sharedExportToLocal: Map<string, string>,
+  parse: ParseFn
 ): string {
-  const ast = acorn.parse(code, {
-    ecmaVersion: 'latest',
-    sourceType: 'module'
-  }) as Node;
+  const ast = parse(code) as Node;
 
   const s = new MagicString(code);
 
@@ -343,11 +329,8 @@ function removeSharedImportsAndRewriteRefs(
  * Extracts which exports from the shared chunk are imported by this code.
  * Returns a set of imported names (the names exported from shared, not local aliases).
  */
-export function extractSharedImports(code: string, sharedChunkFileName: string): Set<string> {
-  const ast = acorn.parse(code, {
-    ecmaVersion: 'latest',
-    sourceType: 'module'
-  }) as Node;
+export function extractSharedImports(code: string, sharedChunkFileName: string, parse: ParseFn): Set<string> {
+  const ast = parse(code) as Node;
 
   const imports = new Set<string>();
 
@@ -387,14 +370,15 @@ export function mergeSharedIntoPrimary(
   primaryChunk: OutputChunk,
   sharedChunk: OutputChunk,
   sharedProperty: string,
-  neededExports: Set<string>
+  neededExports: Set<string>,
+  parse: ParseFn
 ): void {
   // Extract export information BEFORE renaming to preserve original exported names
-  const { exports: sharedExports, hasDefault } = extractExports(sharedChunk.code);
+  const { exports: sharedExports, hasDefault } = extractExports(sharedChunk.code, parse);
 
   // Extract declarations from both chunks to detect collisions
-  const sharedDeclarations = extractTopLevelDeclarations(sharedChunk.code);
-  const primaryDeclarations = extractTopLevelDeclarations(primaryChunk.code);
+  const sharedDeclarations = extractTopLevelDeclarations(sharedChunk.code, parse);
+  const primaryDeclarations = extractTopLevelDeclarations(primaryChunk.code, parse);
 
   // Find collisions and build rename map
   const renameMap = new Map<string, string>();
@@ -408,11 +392,11 @@ export function mergeSharedIntoPrimary(
   // Rename colliding identifiers in the shared code
   let processedSharedCode = sharedChunk.code;
   if (renameMap.size > 0) {
-    processedSharedCode = renameIdentifiers(processedSharedCode, renameMap);
+    processedSharedCode = renameIdentifiers(processedSharedCode, renameMap, parse);
   }
 
   // Strip exports from shared code (convert to plain declarations)
-  const strippedSharedCode = stripExports(processedSharedCode);
+  const strippedSharedCode = stripExports(processedSharedCode, parse);
 
   // Build a map from shared export names to their local names (after collision renames)
   // This is used to rewrite references in the primary code
@@ -430,7 +414,8 @@ export function mergeSharedIntoPrimary(
   const primaryWithoutSharedImports = removeSharedImportsAndRewriteRefs(
     primaryChunk.code,
     sharedChunk.fileName,
-    sharedExportToLocal
+    sharedExportToLocal,
+    parse
   );
 
   // Build the shared exports object using exportedName: localName format

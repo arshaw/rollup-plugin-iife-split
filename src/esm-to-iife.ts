@@ -1,9 +1,15 @@
 import { rollup, type Plugin } from 'rollup';
-import { parse, type Node as AcornNode } from 'acorn';
 import { walk } from 'estree-walker';
-import type { Node as TreeNode, Identifier, MemberExpression, FunctionExpression } from 'estree';
+import type { Node, Identifier, MemberExpression, FunctionExpression } from 'estree';
 import MagicString from 'magic-string';
 import { SHARED_CHUNK_NAME } from './chunk-analyzer';
+import type { ParseFn } from './types';
+
+// For node positions from the parser
+interface WithPosition {
+  start: number;
+  end: number;
+}
 
 export interface ConvertOptions {
   code: string;
@@ -11,6 +17,7 @@ export interface ConvertOptions {
   globals: Record<string, string>;
   sharedGlobalPath: string | null;
   sharedChunkFileName: string | null;
+  parse: ParseFn;
   debug?: boolean;
 }
 
@@ -51,18 +58,15 @@ interface ImportMapping {
  *
  * Returns mappings: [{ imported: 's', local: 'sharedUtil' }, { imported: 'S', local: 'SHARED_CONSTANT' }]
  */
-function extractSharedImportMappings(code: string): ImportMapping[] {
-  const ast = parse(code, {
-    ecmaVersion: 'latest',
-    sourceType: 'module'
-  }) as TreeNode;
+function extractSharedImportMappings(code: string, parse: ParseFn): ImportMapping[] {
+  const ast = parse(code) as Node;
 
   const mappings: ImportMapping[] = [];
 
   walk(ast, {
     enter(node) {
       if (node.type === 'ImportDeclaration') {
-        const importNode = node as TreeNode & {
+        const importNode = node as Node & {
           source: { value: unknown };
           specifiers: Array<{
             type: string;
@@ -131,11 +135,8 @@ function stripNamespaceGuards(code: string): string {
  *     SHARED_CONSTANT;
  *   })({}, MyLib.Shared);
  */
-function destructureSharedParameter(code: string, mappings: ImportMapping[]): string {
-  const ast = parse(code, {
-    ecmaVersion: 'latest',
-    sourceType: 'script'
-  }) as TreeNode;
+function destructureSharedParameter(code: string, mappings: ImportMapping[], parse: ParseFn): string {
+  const ast = parse(code) as Node;
 
   const ms = new MagicString(code);
 
@@ -154,7 +155,7 @@ function destructureSharedParameter(code: string, mappings: ImportMapping[]): st
           // Last parameter is always the shared one
           const lastParam = params[params.length - 1];
           if (lastParam.type === 'Identifier') {
-            const acornParam = lastParam as Identifier & AcornNode;
+            const acornParam = lastParam as Identifier & WithPosition;
             sharedParamStart = acornParam.start;
             sharedParamEnd = acornParam.end;
             sharedParamName = lastParam.name;
@@ -174,7 +175,7 @@ function destructureSharedParameter(code: string, mappings: ImportMapping[]): st
   walk(ast, {
     enter(node) {
       if (node.type === 'MemberExpression') {
-        const memberNode = node as MemberExpression & AcornNode;
+        const memberNode = node as MemberExpression & WithPosition;
         const obj = memberNode.object;
         if (obj.type === 'Identifier' && obj.name === sharedParamName && !memberNode.computed) {
           const prop = memberNode.property as Identifier;
@@ -222,7 +223,7 @@ function destructureSharedParameter(code: string, mappings: ImportMapping[]): st
   walk(ast, {
     enter(node) {
       if (node.type === 'ExpressionStatement') {
-        const exprStmt = node as TreeNode & AcornNode & { expression: TreeNode & { value?: unknown } };
+        const exprStmt = node as Node & WithPosition & { expression: Node & { value?: unknown } };
         if (exprStmt.expression.type === 'Literal' && exprStmt.expression.value === 'use strict') {
           ms.remove(exprStmt.start, exprStmt.end);
         }
@@ -234,11 +235,11 @@ function destructureSharedParameter(code: string, mappings: ImportMapping[]): st
 }
 
 export async function convertToIife(options: ConvertOptions): Promise<string> {
-  const { code, globalName, globals, sharedGlobalPath, sharedChunkFileName, debug } = options;
+  const { code, globalName, globals, sharedGlobalPath, sharedChunkFileName, parse, debug } = options;
 
   // For satellite chunks, extract import mappings BEFORE IIFE conversion
   // These will be used to create destructuring parameter with nice names
-  const importMappings = sharedGlobalPath ? extractSharedImportMappings(code) : [];
+  const importMappings = sharedGlobalPath ? extractSharedImportMappings(code, parse) : [];
 
   if (debug && sharedGlobalPath) {
     console.log('\n=== DEBUG convertToIife ===');
@@ -299,7 +300,7 @@ export async function convertToIife(options: ConvertOptions): Promise<string> {
   // The function will extract property accesses as fallback if no mappings found
   if (sharedGlobalPath) {
     result = stripNamespaceGuards(result);
-    result = destructureSharedParameter(result, importMappings);
+    result = destructureSharedParameter(result, importMappings, parse);
 
     if (debug) {
       console.log('--- IIFE after destructuring (first 800 chars) ---');

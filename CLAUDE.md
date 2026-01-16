@@ -99,7 +99,6 @@ See comment at top of `test/plugin.test.ts` for debugging instructions.
 
 ## Dependencies
 
-- `acorn` - ESM parsing for export extraction
 - `estree-walker` - AST traversal
 - `magic-string` - String manipulation with source map support
-- `rollup` - Peer dependency, also used internally for ESM→IIFE conversion
+- `rollup` - Peer dependency, also used internally for ESM→IIFE conversion. The plugin uses Rollup's `this.parse()` for parsing, making it parser-agnostic and Rolldown-compatible.

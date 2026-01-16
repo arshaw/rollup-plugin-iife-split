@@ -48,6 +48,9 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
 
     // Main transformation hook - convert ESM chunks to IIFE
     async generateBundle(outputOptions, bundle) {
+      // Get Rollup's parser - this makes us parser-agnostic (works with Rolldown too)
+      const parse = this.parse.bind(this);
+
       // Step 1: Analyze the bundle to identify chunk types
       const analysis = analyzeChunks(bundle, primary);
 
@@ -58,7 +61,7 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
         // Collect which shared exports are actually needed by satellites
         const neededExports = new Set<string>();
         for (const satellite of analysis.satelliteChunks) {
-          const imports = extractSharedImports(satellite.code, analysis.sharedChunk.fileName);
+          const imports = extractSharedImports(satellite.code, analysis.sharedChunk.fileName, parse);
           for (const imp of imports) {
             neededExports.add(imp);
           }
@@ -68,7 +71,8 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
           analysis.primaryChunk,
           analysis.sharedChunk,
           sharedProp,
-          neededExports
+          neededExports,
+          parse
         );
 
         // Remove the shared chunk from output (it's now merged into primary)
@@ -86,6 +90,7 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
           globals: outputGlobals,
           sharedGlobalPath: null, // Primary doesn't need to import shared
           sharedChunkFileName: null,
+          parse,
           debug
         }).then(code => {
           analysis.primaryChunk.code = code;
@@ -121,6 +126,7 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
             globals: outputGlobals,
             sharedGlobalPath: `${primaryGlobal}.${sharedProp}`,
             sharedChunkFileName,
+            parse,
             debug
           }).then(code => {
             satellite.code = code;

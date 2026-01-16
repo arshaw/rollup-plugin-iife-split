@@ -1,4 +1,10 @@
 import type { OutputChunk } from 'rollup';
+import type { Program } from 'estree';
+
+/**
+ * Parser function type - compatible with Rollup's this.parse()
+ */
+export type ParseFn = (code: string) => Program;
 
 export interface IifeSplitOptions {
   /**
