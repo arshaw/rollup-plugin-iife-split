@@ -691,4 +691,57 @@ describe('rollup-plugin-iife-split', () => {
       expect(typeof myLib.mainFeature).toBe('function');
     });
   });
+
+  describe('Shared export filtering', () => {
+    it('should only include exports in Shared that satellites actually use', async () => {
+      const result = await buildFixture({
+        fixtureName: 'primary-only-import',
+        pluginOptions: {
+          primary: 'main',
+          primaryGlobal: 'MyLib',
+          secondaryProps: { secondary: 'Secondary' },
+          sharedProp: 'Shared'
+        },
+        entryNames: ['main', 'secondary']
+      });
+      outputDir = result.outputDir;
+
+      const mainCode = result.files['main.js'];
+
+      // The Shared object should have:
+      // - sharedUtil (used by secondary) - mapped to minified export name
+      // - secondaryOnlyUtil (used by secondary) - mapped to minified export name
+      // It should NOT have:
+      // - primaryOnlyUtil (only used by primary)
+
+      // Check the Shared object - function names are the values, export names are the keys
+      // Rollup minifies export names, so we check for the function names as values
+      expect(mainCode).toMatch(/const Shared = \{[^}]*: sharedUtil/);
+      expect(mainCode).toMatch(/const Shared = \{[^}]*: secondaryOnlyUtil/);
+      // primaryOnlyUtil should NOT be in the Shared object
+      expect(mainCode).not.toMatch(/const Shared = \{[^}]*primaryOnlyUtil/);
+
+      // But primaryOnlyUtil should still exist in the code (just not exported via Shared)
+      assertContains(mainCode, 'primaryOnlyUtil', 'primaryOnlyUtil should still be in the code');
+
+      // Execute and verify everything works
+      const context: Record<string, unknown> = {};
+      vm.runInNewContext(mainCode, context);
+      vm.runInNewContext(result.files['secondary.js'], context);
+
+      const myLib = context.MyLib as Record<string, unknown>;
+      expect(myLib).toBeDefined();
+
+      // Verify Shared object has exactly 2 exports (not 3)
+      const shared = myLib.Shared as Record<string, unknown>;
+      const sharedKeys = Object.keys(shared);
+      expect(sharedKeys.length).toBe(2);
+
+      // Verify both entries work correctly
+      const mainFeature = (myLib as Record<string, () => string>).mainFeature;
+      const secondary = myLib.Secondary as Record<string, () => string>;
+      expect(mainFeature()).toBe('Main: shared + primary-only');
+      expect(secondary.secondaryFeature()).toBe('Secondary: shared + secondary-only');
+    });
+  });
 });

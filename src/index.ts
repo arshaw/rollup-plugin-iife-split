@@ -2,7 +2,7 @@ import type { Plugin, OutputOptions, GetManualChunk } from 'rollup';
 import type { IifeSplitOptions } from './types';
 import { analyzeChunks, SHARED_CHUNK_NAME } from './chunk-analyzer';
 import { convertToIife } from './esm-to-iife';
-import { mergeSharedIntoPrimary } from './chunk-merger';
+import { mergeSharedIntoPrimary, extractSharedImports } from './chunk-merger';
 
 export type { IifeSplitOptions };
 
@@ -55,10 +55,20 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
       const sharedChunkFileName = analysis.sharedChunk?.fileName ?? null;
 
       if (analysis.sharedChunk) {
+        // Collect which shared exports are actually needed by satellites
+        const neededExports = new Set<string>();
+        for (const satellite of analysis.satelliteChunks) {
+          const imports = extractSharedImports(satellite.code, analysis.sharedChunk.fileName);
+          for (const imp of imports) {
+            neededExports.add(imp);
+          }
+        }
+
         mergeSharedIntoPrimary(
           analysis.primaryChunk,
           analysis.sharedChunk,
-          sharedProp
+          sharedProp,
+          neededExports
         );
 
         // Remove the shared chunk from output (it's now merged into primary)

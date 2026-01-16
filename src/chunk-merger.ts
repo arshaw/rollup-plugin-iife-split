@@ -339,10 +339,55 @@ function removeSharedImportsAndRewriteRefs(
   return s.toString();
 }
 
+/**
+ * Extracts which exports from the shared chunk are imported by this code.
+ * Returns a set of imported names (the names exported from shared, not local aliases).
+ */
+export function extractSharedImports(code: string, sharedChunkFileName: string): Set<string> {
+  const ast = acorn.parse(code, {
+    ecmaVersion: 'latest',
+    sourceType: 'module'
+  }) as Node;
+
+  const imports = new Set<string>();
+
+  walk(ast, {
+    enter(node) {
+      if (node.type === 'ImportDeclaration') {
+        const importNode = node as Node & {
+          source: { value: unknown };
+          specifiers: Array<{
+            type: string;
+            local: Identifier;
+            imported?: Identifier;
+          }>;
+        };
+        const source = importNode.source.value;
+        if (typeof source === 'string' && isSharedChunkSource(source, sharedChunkFileName)) {
+          for (const spec of importNode.specifiers) {
+            if (spec.type === 'ImportSpecifier' && spec.imported) {
+              imports.add(spec.imported.name);
+            } else if (spec.type === 'ImportDefaultSpecifier') {
+              imports.add('default');
+            } else if (spec.type === 'ImportNamespaceSpecifier') {
+              // Namespace import - we'll need to analyze member accesses
+              // For now, mark as needing all exports (conservative)
+              // A more sophisticated approach would analyze MemberExpressions
+            }
+          }
+        }
+      }
+    }
+  });
+
+  return imports;
+}
+
 export function mergeSharedIntoPrimary(
   primaryChunk: OutputChunk,
   sharedChunk: OutputChunk,
-  sharedProperty: string
+  sharedProperty: string,
+  neededExports: Set<string>
 ): void {
   // Extract export information BEFORE renaming to preserve original exported names
   const { exports: sharedExports, hasDefault } = extractExports(sharedChunk.code);
@@ -389,15 +434,18 @@ export function mergeSharedIntoPrimary(
   );
 
   // Build the shared exports object using exportedName: localName format
+  // Only include exports that are actually needed by satellites
   // Apply rename map to localNames to reflect collision renames
   const sharedExportEntries = [
-    ...sharedExports.map(exp => {
-      const renamedLocal = renameMap.get(exp.localName) ?? exp.localName;
-      return exp.exportedName === renamedLocal
-        ? renamedLocal
-        : `${exp.exportedName}: ${renamedLocal}`;
-    }),
-    ...(hasDefault ? ['default: __shared_default__'] : [])
+    ...sharedExports
+      .filter(exp => neededExports.has(exp.exportedName))
+      .map(exp => {
+        const renamedLocal = renameMap.get(exp.localName) ?? exp.localName;
+        return exp.exportedName === renamedLocal
+          ? renamedLocal
+          : `${exp.exportedName}: ${renamedLocal}`;
+      }),
+    ...(hasDefault && neededExports.has('default') ? ['default: __shared_default__'] : [])
   ];
 
   const sharedExportObject = `const ${sharedProperty} = { ${sharedExportEntries.join(', ')} };`;
