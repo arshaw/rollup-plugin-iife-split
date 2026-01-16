@@ -3,7 +3,7 @@ import { parse, type Node as AcornNode } from 'acorn';
 import { walk } from 'estree-walker';
 import type { Node as TreeNode, Identifier, MemberExpression, FunctionExpression } from 'estree';
 import MagicString from 'magic-string';
-import { SHARED_CHUNK_NAME } from './chunk-analyzer.js';
+import { SHARED_CHUNK_NAME } from './chunk-analyzer';
 
 export interface ConvertOptions {
   code: string;

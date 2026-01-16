@@ -1,5 +1,5 @@
 import type { OutputBundle, OutputChunk, OutputAsset } from 'rollup';
-import type { ChunkAnalysis } from './types.js';
+import type { ChunkAnalysis } from './types';
 
 function isOutputChunk(item: OutputChunk | OutputAsset): item is OutputChunk {
   return item.type === 'chunk';

@@ -70,7 +70,7 @@ var MyLib = (function (exports) {
 
 **admin.js** (satellite entry):
 ```js
-var Admin = (function (exports, shared) {
+MyLib.Admin = (function (exports, shared) {
   // Uses shared code via parameter
   function adminFeature() {
     return shared.sharedUtil();
@@ -92,7 +92,7 @@ var Admin = (function (exports, shared) {
 
 <script>
   MyLib.mainFeature();
-  Admin.adminFeature();
+  MyLib.Admin.adminFeature();
 </script>
 ```
 

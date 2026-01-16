@@ -93,6 +93,10 @@ Tests execute output in Node's `vm` module to verify runtime correctness.
 
 See comment at top of `test/plugin.test.ts` for debugging instructions.
 
+## Code Style
+
+- **Imports**: Use extensionless relative imports (e.g., `from './types'` not `from './types.js'`). The tsconfig uses `moduleResolution: bundler` which supports this.
+
 ## Dependencies
 
 - `acorn` - ESM parsing for export extraction

@@ -1,8 +1,8 @@
 import type { Plugin, OutputOptions, GetManualChunk } from 'rollup';
-import type { IifeSplitOptions } from './types.js';
-import { analyzeChunks, SHARED_CHUNK_NAME } from './chunk-analyzer.js';
-import { convertToIife } from './esm-to-iife.js';
-import { mergeSharedIntoPrimary } from './chunk-merger.js';
+import type { IifeSplitOptions } from './types';
+import { analyzeChunks, SHARED_CHUNK_NAME } from './chunk-analyzer';
+import { convertToIife } from './esm-to-iife';
+import { mergeSharedIntoPrimary } from './chunk-merger';
 
 export type { IifeSplitOptions };
 

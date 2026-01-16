@@ -3,7 +3,7 @@ import * as acorn from 'acorn';
 import { walk } from 'estree-walker';
 import type { OutputChunk } from 'rollup';
 import type { Node, ExportNamedDeclaration, ExportDefaultDeclaration, Identifier, Program, VariableDeclaration, FunctionDeclaration, ClassDeclaration } from 'estree';
-import { SHARED_CHUNK_NAME } from './chunk-analyzer.js';
+import { SHARED_CHUNK_NAME } from './chunk-analyzer';
 
 interface ExportMapping {
   exportedName: string;
