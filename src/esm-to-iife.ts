@@ -126,21 +126,6 @@ function extractPropertyAccessMappings(code: string): ImportMapping[] {
 }
 
 /**
- * Transforms satellite IIFE to use destructuring parameter with original names.
- *
- * Before:
- *   (function (exports, __shared__xxx_js) {
- *     __shared__xxx_js.s();
- *     __shared__xxx_js.S;
- *   })({}, MyLib.Shared);
- *
- * After:
- *   (function (exports, { s: sharedUtil, S: SHARED_CONSTANT }) {
- *     sharedUtil();
- *     SHARED_CONSTANT;
- *   })({}, MyLib.Shared);
- */
-/**
  * Strips Rollup's namespace guard pattern from satellite IIFEs.
  *
  * Before:
@@ -160,6 +145,21 @@ function stripNamespaceGuards(code: string): string {
   return result;
 }
 
+/**
+ * Transforms satellite IIFE to use destructuring parameter with original names.
+ *
+ * Before:
+ *   (function (exports, __shared__xxx_js) {
+ *     __shared__xxx_js.s();
+ *     __shared__xxx_js.S;
+ *   })({}, MyLib.Shared);
+ *
+ * After:
+ *   (function (exports, { s: sharedUtil, S: SHARED_CONSTANT }) {
+ *     sharedUtil();
+ *     SHARED_CONSTANT;
+ *   })({}, MyLib.Shared);
+ */
 function destructureSharedParameter(code: string, mappings: ImportMapping[]): string {
   // Find the shared parameter name pattern
   const sharedParamPattern = /__shared__[A-Za-z0-9]+_+js/g;
@@ -236,7 +236,7 @@ export async function convertToIife(options: ConvertOptions): Promise<string> {
 
   // Build the globals function for Rollup
   // Use a function to flexibly match the shared chunk import regardless of exact path format
-  const rollupGlobals = (id: string): string | undefined => {
+  const rollupGlobals = (id: string): string => {
     // Check if this is a shared chunk import
     if (sharedGlobalPath) {
       // Match any import that contains __shared__ (the shared chunk pattern)
@@ -252,8 +252,8 @@ export async function convertToIife(options: ConvertOptions): Promise<string> {
       }
     }
 
-    // Fall back to user-provided globals
-    return globals[id];
+    // Fall back to user-provided globals, or use id as-is
+    return globals[id] ?? id;
   };
 
   const bundle = await rollup({
