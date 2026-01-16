@@ -40,7 +40,7 @@ export default {
       primaryGlobal: 'MyLib', // Browser global: window.MyLib
       secondaryProps: {
         admin: 'Admin',       // Browser global: window.MyLib.Admin
-        width: 'Widget',      // Browser global: window.MyLib.Widget
+        widget: 'Widget',     // Browser global: window.MyLib.Widget
       },
       sharedProp: 'Shared',   // Shared code at: window.MyLib.Shared
     })
@@ -98,11 +98,13 @@ MyLib.Admin = (function (exports, shared) {
 
 ## Options
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `primary` | `string` | Name of the primary entry (must match a key in Rollup's `input`) |
-| `globalName` | `string` | Browser global variable name for the primary entry |
-| `sharedProperty` | `string` | Property name on the global where shared exports are attached |
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `primary` | `string` | Yes | Name of the primary entry (must match a key in Rollup's `input`). Shared code is merged into this entry. |
+| `primaryGlobal` | `string` | Yes | Browser global variable name for the primary entry. Example: `'MyLib'` → `window.MyLib` |
+| `secondaryProps` | `Record<string, string>` | Yes | Maps secondary entry names to their property name on the primary global. Example: `{ admin: 'Admin' }` → `window.MyLib.Admin` |
+| `sharedProp` | `string` | Yes | Property name on the global where shared exports are attached. Example: `'Shared'` → `window.MyLib.Shared` |
+| `debug` | `boolean` | No | Enable debug logging to see intermediate transformation steps. |
 
 ## How It Works
 
