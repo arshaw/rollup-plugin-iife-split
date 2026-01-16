@@ -26,6 +26,11 @@ export interface IifeSplitOptions {
    * Example: 'Shared' results in `window.MyLib.Shared = { ... }`
    */
   sharedProp: string;
+
+  /**
+   * Enable debug logging to see intermediate transformation steps.
+   */
+  debug?: boolean;
 }
 
 export interface ChunkAnalysis {

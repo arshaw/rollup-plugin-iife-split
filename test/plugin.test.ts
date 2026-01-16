@@ -395,6 +395,154 @@ describe('rollup-plugin-iife-split', () => {
     });
   });
 
+  describe('shared code merge', () => {
+    it('should correctly merge shared code and produce working IIFEs', async () => {
+      const result = await buildFixture({
+        fixtureName: 'collision',
+        pluginOptions: {
+          primary: 'main',
+          primaryGlobal: 'MyLib',
+          secondaryProps: { secondary: 'Secondary' },
+          sharedProp: 'Shared'
+        },
+        entryNames: ['main', 'secondary']
+      });
+      outputDir = result.outputDir;
+
+      const mainCode = result.files['main.js'];
+      const secondaryCode = result.files['secondary.js'];
+
+      // Both should be valid IIFEs
+      assertContains(mainCode, 'var MyLib', 'Primary should define global variable');
+      assertContains(mainCode, '(function', 'Primary should be wrapped in IIFE');
+      assertContains(secondaryCode, '(function', 'Secondary should be wrapped in IIFE');
+
+      // Execute and verify both work correctly
+      const context: Record<string, unknown> = {};
+      vm.runInNewContext(mainCode, context);
+      vm.runInNewContext(secondaryCode, context);
+
+      const myLib = context.MyLib as Record<string, unknown>;
+      expect(myLib).toBeDefined();
+
+      // Test that mainFeature uses both local and shared functions
+      const mainFeature = myLib.mainFeature as () => string;
+      const mainResult = mainFeature();
+      expect(mainResult).toContain('main-local-helper');
+      expect(mainResult).toContain('shared-helper-result');
+      expect(mainResult).toContain('shared-processed: test');
+      expect(mainResult).toContain('1.0');
+
+      // Test that secondary uses shared functions via MyLib.Shared
+      const secondary = myLib.Secondary as Record<string, unknown>;
+      const secondaryFeature = secondary.secondaryFeature as () => string;
+      const secondaryResult = secondaryFeature();
+      expect(secondaryResult).toContain('shared-helper-result');
+      expect(secondaryResult).toContain('shared-processed: secondary');
+    });
+  });
+
+  describe('IIFE output format', () => {
+    it('should use destructured parameter with original names in satellite IIFEs', async () => {
+      const result = await buildFixture('basic', {
+        primary: 'main',
+        primaryGlobal: 'MyLib',
+        secondaryProps: { secondary: 'Secondary' },
+        sharedProp: 'Shared'
+      });
+      outputDir = result.outputDir;
+
+      const secondaryCode = result.files['secondary.js'];
+
+      // Should use destructuring with original names like { s: sharedUtil, S: SHARED_CONSTANT }
+      assertContains(secondaryCode, 'sharedUtil', 'Satellite should use original import names');
+      assertNotContains(secondaryCode, '__shared__', 'Satellite should not have ugly __shared__ parameter name');
+      // Should have destructuring pattern in function signature
+      expect(secondaryCode).toMatch(/function\s*\([^)]+,\s*\{[^}]+\}\s*\)/);
+    });
+
+    it('should pass correct global to satellite IIFE', async () => {
+      const result = await buildFixture('basic', {
+        primary: 'main',
+        primaryGlobal: 'MyLib',
+        secondaryProps: { secondary: 'Secondary' },
+        sharedProp: 'Shared'
+      });
+      outputDir = result.outputDir;
+
+      const secondaryCode = result.files['secondary.js'];
+
+      // Should pass MyLib.Shared as argument to IIFE
+      assertContains(secondaryCode, 'MyLib.Shared', 'Satellite should receive MyLib.Shared as argument');
+      // The IIFE should end with })(exports-object, MyLib.Shared);
+      expect(secondaryCode).toMatch(/\}\)\(\{\},\s*MyLib\.Shared\);?\s*$/);
+    });
+
+    it('should not have namespace references in primary IIFE', async () => {
+      const result = await buildFixture('basic', {
+        primary: 'main',
+        primaryGlobal: 'MyLib',
+        secondaryProps: { secondary: 'Secondary' },
+        sharedProp: 'Shared'
+      });
+      outputDir = result.outputDir;
+
+      const mainCode = result.files['main.js'];
+
+      // Primary should not reference __shared__ as it contains merged shared code
+      assertNotContains(mainCode, '__shared__', 'Primary should not have __shared__ references after merge');
+
+      // Primary should define the global variable
+      assertContains(mainCode, 'var MyLib', 'Primary should define MyLib global');
+    });
+
+    it('should use custom sharedProp name in satellite', async () => {
+      const result = await buildFixture('basic', {
+        primary: 'main',
+        primaryGlobal: 'MyLib',
+        secondaryProps: { secondary: 'Secondary' },
+        sharedProp: 'Core'  // Custom name instead of 'Shared'
+      });
+      outputDir = result.outputDir;
+
+      const mainCode = result.files['main.js'];
+      const secondaryCode = result.files['secondary.js'];
+
+      // Primary should export Core
+      assertContains(mainCode, 'Core', 'Primary should have Core export');
+
+      // Secondary should reference MyLib.Core
+      assertContains(secondaryCode, 'MyLib.Core', 'Satellite should reference MyLib.Core');
+    });
+
+    it('should use destructuring even for side-effect-only satellites (no exports)', async () => {
+      const result = await buildFixture({
+        fixtureName: 'side-effects',
+        pluginOptions: {
+          primary: 'main',
+          primaryGlobal: 'MyLib',
+          secondaryProps: {}, // No secondary entries with exports
+          sharedProp: 'Shared'
+        },
+        entryNames: ['main', 'init']
+      });
+      outputDir = result.outputDir;
+
+      const initCode = result.files['init.js'];
+
+      // init.js has no exports, so IIFE has single parameter
+      // It should still use destructuring: (function ({ r: registerGlobal, S: SHARED_VERSION }) {
+      assertContains(initCode, 'registerGlobal', 'Should use original import name');
+      assertNotContains(initCode, '__shared__', 'Should not have ugly __shared__ parameter');
+
+      // Should have destructuring pattern (single parameter case)
+      expect(initCode).toMatch(/function\s*\(\s*\{[^}]+\}\s*\)/);
+
+      // Should pass MyLib.Shared as argument
+      assertContains(initCode, 'MyLib.Shared', 'Should receive MyLib.Shared as argument');
+    });
+  });
+
   describe('secondaryProps', () => {
     it('should attach secondary entries as properties on the primary global', async () => {
       const result = await buildFixture('basic', {

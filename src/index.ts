@@ -7,7 +7,7 @@ import { mergeSharedIntoPrimary } from './chunk-merger.js';
 export type { IifeSplitOptions };
 
 export default function iifeSplit(options: IifeSplitOptions): Plugin {
-  const { primary, primaryGlobal, secondaryProps, sharedProp } = options;
+  const { primary, primaryGlobal, secondaryProps, sharedProp, debug } = options;
 
   // Store globals from output options for use in generateBundle
   let outputGlobals: Record<string, string> = {};
@@ -75,7 +75,8 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
           globalName: primaryGlobal,
           globals: outputGlobals,
           sharedGlobalPath: null, // Primary doesn't need to import shared
-          sharedChunkFileName: null
+          sharedChunkFileName: null,
+          debug
         }).then(code => {
           analysis.primaryChunk.code = code;
         })
@@ -109,7 +110,8 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
             globalName: satelliteGlobalName,
             globals: outputGlobals,
             sharedGlobalPath: `${primaryGlobal}.${sharedProp}`,
-            sharedChunkFileName
+            sharedChunkFileName,
+            debug
           }).then(code => {
             satellite.code = code;
           })
