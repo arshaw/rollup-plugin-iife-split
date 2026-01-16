@@ -13,9 +13,10 @@
   "scripts": {
     "clean": "rm -rf dist",
     "build": "tsup src/index.ts --format esm --dts",
+    "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
-    "prepublishOnly": "pnpm run build && pnpm run test:run"
+    "prepublishOnly": "pnpm run typecheck && pnpm run build && pnpm run test:run"
   },
   "peerDependencies": {
     "rollup": "^3.0.0 || ^4.0.0"

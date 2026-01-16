@@ -1,7 +1,7 @@
 import { rollup, type Plugin } from 'rollup';
-import * as acorn from 'acorn';
+import { parse, type Node as AcornNode } from 'acorn';
 import { walk } from 'estree-walker';
-import type { Node, Identifier, MemberExpression, FunctionExpression, Pattern } from 'estree';
+import type { Node as TreeNode, Identifier, MemberExpression, FunctionExpression } from 'estree';
 import MagicString from 'magic-string';
 import { SHARED_CHUNK_NAME } from './chunk-analyzer.js';
 
@@ -52,17 +52,17 @@ interface ImportMapping {
  * Returns mappings: [{ imported: 's', local: 'sharedUtil' }, { imported: 'S', local: 'SHARED_CONSTANT' }]
  */
 function extractSharedImportMappings(code: string): ImportMapping[] {
-  const ast = acorn.parse(code, {
+  const ast = parse(code, {
     ecmaVersion: 'latest',
     sourceType: 'module'
-  }) as Node;
+  }) as TreeNode;
 
   const mappings: ImportMapping[] = [];
 
   walk(ast, {
     enter(node) {
       if (node.type === 'ImportDeclaration') {
-        const importNode = node as Node & {
+        const importNode = node as TreeNode & {
           source: { value: unknown };
           specifiers: Array<{
             type: string;
@@ -95,10 +95,6 @@ function extractSharedImportMappings(code: string): ImportMapping[] {
   return mappings;
 }
 
-interface NodeWithRange extends Node {
-  start: number;
-  end: number;
-}
 
 /**
  * Strips Rollup's namespace guard pattern from satellite IIFEs.
@@ -136,52 +132,57 @@ function stripNamespaceGuards(code: string): string {
  *   })({}, MyLib.Shared);
  */
 function destructureSharedParameter(code: string, mappings: ImportMapping[]): string {
-  const ast = acorn.parse(code, {
+  const ast = parse(code, {
     ecmaVersion: 'latest',
     sourceType: 'script'
-  }) as NodeWithRange;
+  }) as TreeNode;
 
   const ms = new MagicString(code);
 
   // Find the IIFE's FunctionExpression
-  let iifeFn: (FunctionExpression & NodeWithRange) | null = null;
-  let sharedParam: (Pattern & NodeWithRange) | null = null;
+  let sharedParamStart = -1;
+  let sharedParamEnd = -1;
   let sharedParamName: string | null = null;
 
   walk(ast, {
     enter(node) {
       // Find the first FunctionExpression (the IIFE)
-      if (!iifeFn && node.type === 'FunctionExpression') {
-        iifeFn = node as FunctionExpression & NodeWithRange;
-        const params = iifeFn.params;
+      if (sharedParamName === null && node.type === 'FunctionExpression') {
+        const fn = node as FunctionExpression;
+        const params = fn.params;
         if (params.length > 0) {
           // Last parameter is always the shared one
-          const lastParam = params[params.length - 1] as Pattern & NodeWithRange;
+          const lastParam = params[params.length - 1];
           if (lastParam.type === 'Identifier') {
-            sharedParam = lastParam;
-            sharedParamName = (lastParam as Identifier).name;
+            const acornParam = lastParam as Identifier & AcornNode;
+            sharedParamStart = acornParam.start;
+            sharedParamEnd = acornParam.end;
+            sharedParamName = lastParam.name;
           }
         }
       }
     }
   });
 
-  if (!sharedParam || !sharedParamName) {
+  if (sharedParamName === null) {
     return code;
   }
 
   // Collect all MemberExpression accesses on the shared param
-  // and build mappings if not provided
-  const propertyAccesses: Array<{ node: MemberExpression & NodeWithRange; propName: string }> = [];
+  const propertyAccesses: Array<{ start: number; end: number; propName: string }> = [];
 
   walk(ast, {
     enter(node) {
       if (node.type === 'MemberExpression') {
-        const memberNode = node as MemberExpression & NodeWithRange;
+        const memberNode = node as MemberExpression & AcornNode;
         const obj = memberNode.object;
         if (obj.type === 'Identifier' && obj.name === sharedParamName && !memberNode.computed) {
           const prop = memberNode.property as Identifier;
-          propertyAccesses.push({ node: memberNode, propName: prop.name });
+          propertyAccesses.push({
+            start: memberNode.start,
+            end: memberNode.end,
+            propName: prop.name
+          });
         }
       }
     }
@@ -209,22 +210,21 @@ function destructureSharedParameter(code: string, mappings: ImportMapping[]): st
     m.imported === m.local ? m.imported : `${m.imported}: ${m.local}`
   );
   const destructurePattern = `{ ${destructureEntries.join(', ')} }`;
-  ms.overwrite(sharedParam.start, sharedParam.end, destructurePattern);
+  ms.overwrite(sharedParamStart, sharedParamEnd, destructurePattern);
 
   // Replace all property accesses: sharedParam.prop -> localName
-  for (const { node, propName } of propertyAccesses) {
+  for (const { start, end, propName } of propertyAccesses) {
     const localName = importToLocal.get(propName) ?? propName;
-    ms.overwrite(node.start, node.end, localName);
+    ms.overwrite(start, end, localName);
   }
 
   // Remove 'use strict' directive - it's illegal with destructuring parameters
   walk(ast, {
     enter(node) {
       if (node.type === 'ExpressionStatement') {
-        const exprNode = node as NodeWithRange & { expression: NodeWithRange & { value?: string } };
-        const expr = exprNode.expression;
-        if (expr.type === 'Literal' && expr.value === 'use strict') {
-          ms.remove(exprNode.start, exprNode.end);
+        const exprStmt = node as TreeNode & AcornNode & { expression: TreeNode & { value?: unknown } };
+        if (exprStmt.expression.type === 'Literal' && exprStmt.expression.value === 'use strict') {
+          ms.remove(exprStmt.start, exprStmt.end);
         }
       }
     }
