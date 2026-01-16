@@ -559,6 +559,27 @@ describe('rollup-plugin-iife-split', () => {
       assertContains(secondaryCode, 'MyLib.Secondary', 'Secondary should be assigned to MyLib.Secondary');
     });
 
+    it('should not include namespace guard for satellites', async () => {
+      const result = await buildFixture('basic', {
+        primary: 'main',
+        primaryGlobal: 'MyLib',
+        secondaryProps: { secondary: 'Secondary' },
+        sharedProp: 'Shared'
+      });
+      outputDir = result.outputDir;
+
+      const secondaryCode = result.files['secondary.js'];
+
+      // Should NOT have the guard pattern: this.MyLib = this.MyLib || {};
+      assertNotContains(secondaryCode, 'this.MyLib = this.MyLib || {}', 'Should not have namespace guard');
+
+      // Should NOT use this.MyLib.Secondary assignment
+      assertNotContains(secondaryCode, 'this.MyLib.Secondary', 'Should not use this.X.Y assignment');
+
+      // Should use direct assignment: MyLib.Secondary =
+      expect(secondaryCode).toMatch(/^MyLib\.Secondary\s*=/m);
+    });
+
     it('should support custom property names different from entry names', async () => {
       const result = await buildFixture('basic', {
         primary: 'main',

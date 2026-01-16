@@ -140,6 +140,26 @@ function extractPropertyAccessMappings(code: string): ImportMapping[] {
  *     SHARED_CONSTANT;
  *   })({}, MyLib.Shared);
  */
+/**
+ * Strips Rollup's namespace guard pattern from satellite IIFEs.
+ *
+ * Before:
+ *   this.FullCalendar = this.FullCalendar || {};
+ *   this.FullCalendar.ClassicTheme = (function (exports, ...) { ... })(...);
+ *
+ * After:
+ *   FullCalendar.ClassicTheme = (function (exports, ...) { ... })(...);
+ */
+function stripNamespaceGuards(code: string): string {
+  // Remove lines like: this.X = this.X || {};
+  let result = code.replace(/^this\.\w+\s*=\s*this\.\w+\s*\|\|\s*\{\};\n/gm, '');
+
+  // Replace this.X.Y = with X.Y =
+  result = result.replace(/^this\.(\w+\.\w+)\s*=/gm, '$1 =');
+
+  return result;
+}
+
 function destructureSharedParameter(code: string, mappings: ImportMapping[]): string {
   // Find the shared parameter name pattern
   const sharedParamPattern = /__shared__[A-Za-z0-9]+_+js/g;
@@ -261,6 +281,7 @@ export async function convertToIife(options: ConvertOptions): Promise<string> {
   // For satellite chunks, transform to use destructuring with original names
   // The function will extract property accesses as fallback if no mappings found
   if (sharedGlobalPath) {
+    result = stripNamespaceGuards(result);
     result = destructureSharedParameter(result, importMappings);
 
     if (debug) {
