@@ -1,7 +1,8 @@
 import { rollup, type Plugin } from 'rollup';
 import * as acorn from 'acorn';
 import { walk } from 'estree-walker';
-import type { Node, Identifier } from 'estree';
+import type { Node, Identifier, MemberExpression, FunctionExpression, Pattern } from 'estree';
+import MagicString from 'magic-string';
 import { SHARED_CHUNK_NAME } from './chunk-analyzer.js';
 
 export interface ConvertOptions {
@@ -94,35 +95,9 @@ function extractSharedImportMappings(code: string): ImportMapping[] {
   return mappings;
 }
 
-/**
- * Extracts property accesses from IIFE code when named import mappings aren't available.
- *
- * Finds patterns like: __shared__xxx_js.propName
- * Returns mappings where imported === local (since we don't know the original name)
- */
-function extractPropertyAccessMappings(code: string): ImportMapping[] {
-  // Find the shared parameter name pattern
-  const sharedParamPattern = /__shared__[A-Za-z0-9]+_+js/;
-  const paramMatch = code.match(sharedParamPattern);
-  if (!paramMatch) {
-    return [];
-  }
-
-  const paramName = paramMatch[0];
-
-  // Find all property accesses: __shared__xxx_js.propName
-  const accessPattern = new RegExp(`${paramName}\\.(\\w+)`, 'g');
-  const properties = new Set<string>();
-
-  let match;
-  while ((match = accessPattern.exec(code)) !== null) {
-    properties.add(match[1]);
-  }
-
-  return Array.from(properties).map(prop => ({
-    imported: prop,
-    local: prop  // Use same name since we don't know the original
-  }));
+interface NodeWithRange extends Node {
+  start: number;
+  end: number;
 }
 
 /**
@@ -161,59 +136,101 @@ function stripNamespaceGuards(code: string): string {
  *   })({}, MyLib.Shared);
  */
 function destructureSharedParameter(code: string, mappings: ImportMapping[]): string {
-  // Find the shared parameter name pattern
-  const sharedParamPattern = /__shared__[A-Za-z0-9]+_+js/g;
-  const matches = code.match(sharedParamPattern);
-  if (!matches || matches.length === 0) {
+  const ast = acorn.parse(code, {
+    ecmaVersion: 'latest',
+    sourceType: 'script'
+  }) as NodeWithRange;
+
+  const ms = new MagicString(code);
+
+  // Find the IIFE's FunctionExpression
+  let iifeFn: (FunctionExpression & NodeWithRange) | null = null;
+  let sharedParam: (Pattern & NodeWithRange) | null = null;
+  let sharedParamName: string | null = null;
+
+  walk(ast, {
+    enter(node) {
+      // Find the first FunctionExpression (the IIFE)
+      if (!iifeFn && node.type === 'FunctionExpression') {
+        iifeFn = node as FunctionExpression & NodeWithRange;
+        const params = iifeFn.params;
+        if (params.length > 0) {
+          // Last parameter is always the shared one
+          const lastParam = params[params.length - 1] as Pattern & NodeWithRange;
+          if (lastParam.type === 'Identifier') {
+            sharedParam = lastParam;
+            sharedParamName = (lastParam as Identifier).name;
+          }
+        }
+      }
+    }
+  });
+
+  if (!sharedParam || !sharedParamName) {
     return code;
   }
 
-  const paramName = matches[0];
+  // Collect all MemberExpression accesses on the shared param
+  // and build mappings if not provided
+  const propertyAccesses: Array<{ node: MemberExpression & NodeWithRange; propName: string }> = [];
 
-  // If no mappings provided, extract from property accesses in the code
+  walk(ast, {
+    enter(node) {
+      if (node.type === 'MemberExpression') {
+        const memberNode = node as MemberExpression & NodeWithRange;
+        const obj = memberNode.object;
+        if (obj.type === 'Identifier' && obj.name === sharedParamName && !memberNode.computed) {
+          const prop = memberNode.property as Identifier;
+          propertyAccesses.push({ node: memberNode, propName: prop.name });
+        }
+      }
+    }
+  });
+
+  // If no mappings provided, create them from property accesses
   let effectiveMappings = mappings;
   if (effectiveMappings.length === 0) {
-    effectiveMappings = extractPropertyAccessMappings(code);
+    const propNames = new Set(propertyAccesses.map(a => a.propName));
+    effectiveMappings = Array.from(propNames).map(prop => ({
+      imported: prop,
+      local: prop
+    }));
   }
 
   if (effectiveMappings.length === 0) {
     return code;
   }
 
-  // Build the destructuring pattern: { s: sharedUtil, S: SHARED_CONSTANT }
+  // Build a lookup from imported name to local name
+  const importToLocal = new Map(effectiveMappings.map(m => [m.imported, m.local]));
+
+  // Replace the parameter with destructuring pattern
   const destructureEntries = effectiveMappings.map(m =>
     m.imported === m.local ? m.imported : `${m.imported}: ${m.local}`
   );
   const destructurePattern = `{ ${destructureEntries.join(', ')} }`;
+  ms.overwrite(sharedParam.start, sharedParam.end, destructurePattern);
 
-  // Replace parameter declaration: __shared__xxx_js -> { s: sharedUtil, ... }
-  // Handle both cases:
-  // 1. Two params: (function (exports, __shared__xxx) - when satellite has exports
-  // 2. One param: (function (__shared__xxx) - when satellite has no exports (side-effects only)
-  let result = code;
-
-  // Try two-parameter pattern first
-  const twoParamPattern = new RegExp(`(function\\s*\\([^,]+,\\s*)${paramName}(\\s*\\))`);
-  if (twoParamPattern.test(result)) {
-    result = result.replace(twoParamPattern, `$1${destructurePattern}$2`);
-  } else {
-    // Try single-parameter pattern
-    const oneParamPattern = new RegExp(`(function\\s*\\()${paramName}(\\s*\\))`);
-    result = result.replace(oneParamPattern, `$1${destructurePattern}$2`);
+  // Replace all property accesses: sharedParam.prop -> localName
+  for (const { node, propName } of propertyAccesses) {
+    const localName = importToLocal.get(propName) ?? propName;
+    ms.overwrite(node.start, node.end, localName);
   }
 
   // Remove 'use strict' directive - it's illegal with destructuring parameters
-  // Match both single and double quoted versions
-  result = result.replace(/\s*['"]use strict['"];\s*/g, '\n  ');
+  walk(ast, {
+    enter(node) {
+      if (node.type === 'ExpressionStatement') {
+        const exprNode = node as NodeWithRange & { expression: NodeWithRange & { value?: string } };
+        const expr = exprNode.expression;
+        if (expr.type === 'Literal' && expr.value === 'use strict') {
+          ms.remove(exprNode.start, exprNode.end);
+        }
+      }
+    }
+  });
 
-  // Replace all namespace accesses: __shared__xxx_js.prop -> localName
-  for (const mapping of effectiveMappings) {
-    // Match __shared__xxx_js.importedName and replace with localName
-    const accessPattern = new RegExp(`${paramName}\\.${mapping.imported}\\b`, 'g');
-    result = result.replace(accessPattern, mapping.local);
-  }
-
-  return result;
+  return ms.toString();
 }
 
 export async function convertToIife(options: ConvertOptions): Promise<string> {
