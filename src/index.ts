@@ -7,7 +7,7 @@ import { mergeSharedIntoPrimary } from './chunk-merger.js';
 export type { IifeSplitOptions };
 
 export default function iifeSplit(options: IifeSplitOptions): Plugin {
-  const { primary, globalName, sharedProperty } = options;
+  const { primary, primaryGlobal, secondaryProps, sharedProp } = options;
 
   // Store globals from output options for use in generateBundle
   let outputGlobals: Record<string, string> = {};
@@ -58,7 +58,7 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
         mergeSharedIntoPrimary(
           analysis.primaryChunk,
           analysis.sharedChunk,
-          sharedProperty
+          sharedProp
         );
 
         // Remove the shared chunk from output (it's now merged into primary)
@@ -72,7 +72,7 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
       conversions.push(
         convertToIife({
           code: analysis.primaryChunk.code,
-          globalName,
+          globalName: primaryGlobal,
           globals: outputGlobals,
           sharedGlobalPath: null, // Primary doesn't need to import shared
           sharedChunkFileName: null
@@ -83,16 +83,32 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
 
       // Convert satellite chunks
       for (const satellite of analysis.satelliteChunks) {
-        // Derive global name from entry name (capitalize first letter)
-        const satelliteGlobalName = satellite.name.charAt(0).toUpperCase() +
-          satellite.name.slice(1);
+        // Look up the global property name for this satellite entry
+        const satelliteProp = secondaryProps[satellite.name];
+
+        // If satellite has exports, it must be in secondaryProps
+        // If it has no exports (side-effects only), it can be omitted
+        const hasExports = satellite.exports.length > 0;
+        if (!satelliteProp && hasExports) {
+          throw new Error(
+            `Secondary entry "${satellite.name}" not found in secondaryProps. ` +
+            `Available entries: ${Object.keys(secondaryProps).join(', ') || '(none)'}`
+          );
+        }
+
+        // Satellite is assigned as a property on the primary global
+        // e.g., MyLib.Admin for { admin: 'Admin' }
+        // If no exports, we still convert to IIFE but without a global name
+        const satelliteGlobalName = satelliteProp
+          ? `${primaryGlobal}.${satelliteProp}`
+          : undefined;
 
         conversions.push(
           convertToIife({
             code: satellite.code,
             globalName: satelliteGlobalName,
             globals: outputGlobals,
-            sharedGlobalPath: `${globalName}.${sharedProperty}`,
+            sharedGlobalPath: `${primaryGlobal}.${sharedProp}`,
             sharedChunkFileName
           }).then(code => {
             satellite.code = code;

@@ -3,7 +3,7 @@ import { SHARED_CHUNK_NAME } from './chunk-analyzer.js';
 
 export interface ConvertOptions {
   code: string;
-  globalName: string;
+  globalName: string | undefined;
   globals: Record<string, string>;
   sharedGlobalPath: string | null;
   sharedChunkFileName: string | null;

@@ -36,9 +36,13 @@ export default {
   },
   plugins: [
     iifeSplit({
-      primary: 'main',           // Which entry gets the shared code
-      globalName: 'MyLib',       // Browser global: window.MyLib
-      sharedProperty: 'Shared'   // Shared code at: window.MyLib.Shared
+      primary: 'main',        // Which entry gets the shared code
+      primaryGlobal: 'MyLib', // Browser global: window.MyLib
+      secondaryProps: {
+        admin: 'Admin',       // Browser global: window.MyLib.Admin
+        width: 'Widget',      // Browser global: window.MyLib.Widget
+      },
+      sharedProp: 'Shared',   // Shared code at: window.MyLib.Shared
     })
   ],
   output: {

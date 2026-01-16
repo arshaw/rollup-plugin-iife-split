@@ -39,8 +39,9 @@ describe('rollup-plugin-iife-split', () => {
     it('should merge shared code into primary entry', async () => {
       const result = await buildFixture('basic', {
         primary: 'main',
-        globalName: 'MyLib',
-        sharedProperty: 'Shared'
+        primaryGlobal: 'MyLib',
+        secondaryProps: { secondary: 'Secondary' },
+        sharedProp: 'Shared'
       });
       outputDir = result.outputDir;
 
@@ -68,8 +69,9 @@ describe('rollup-plugin-iife-split', () => {
     it('should NOT output a separate shared chunk file', async () => {
       const result = await buildFixture('basic', {
         primary: 'main',
-        globalName: 'MyLib',
-        sharedProperty: 'Shared'
+        primaryGlobal: 'MyLib',
+        secondaryProps: { secondary: 'Secondary' },
+        sharedProp: 'Shared'
       });
       outputDir = result.outputDir;
 
@@ -87,8 +89,9 @@ describe('rollup-plugin-iife-split', () => {
     it('should only output entry files', async () => {
       const result = await buildFixture('basic', {
         primary: 'main',
-        globalName: 'MyLib',
-        sharedProperty: 'Shared'
+        primaryGlobal: 'MyLib',
+        secondaryProps: { secondary: 'Secondary' },
+        sharedProp: 'Shared'
       });
       outputDir = result.outputDir;
 
@@ -101,8 +104,9 @@ describe('rollup-plugin-iife-split', () => {
     it('should produce executable primary code', async () => {
       const result = await buildFixture('basic', {
         primary: 'main',
-        globalName: 'MyLib',
-        sharedProperty: 'Shared'
+        primaryGlobal: 'MyLib',
+        secondaryProps: { secondary: 'Secondary' },
+        sharedProp: 'Shared'
       });
       outputDir = result.outputDir;
 
@@ -135,8 +139,9 @@ describe('rollup-plugin-iife-split', () => {
     it('should produce executable satellite code that uses shared', async () => {
       const result = await buildFixture('basic', {
         primary: 'main',
-        globalName: 'MyLib',
-        sharedProperty: 'Shared'
+        primaryGlobal: 'MyLib',
+        secondaryProps: { secondary: 'Secondary' },
+        sharedProp: 'Shared'
       });
       outputDir = result.outputDir;
 
@@ -150,9 +155,10 @@ describe('rollup-plugin-iife-split', () => {
       // Then execute secondary
       vm.runInNewContext(secondaryCode, context);
 
-      // Verify secondary exports
-      expect(context.Secondary).toBeDefined();
-      const secondary = context.Secondary as Record<string, unknown>;
+      // Verify secondary exports are attached to primary global (MyLib.Secondary)
+      const myLib = context.MyLib as Record<string, unknown>;
+      expect(myLib.Secondary).toBeDefined();
+      const secondary = myLib.Secondary as Record<string, unknown>;
       expect(typeof secondary.secondaryFeature).toBe('function');
 
       // Test execution - should use shared code from primary
@@ -168,8 +174,9 @@ describe('rollup-plugin-iife-split', () => {
       await expect(
         buildFixture('basic', {
           primary: 'nonexistent',
-          globalName: 'MyLib',
-          sharedProperty: 'Shared'
+          primaryGlobal: 'MyLib',
+          secondaryProps: { secondary: 'Secondary' },
+          sharedProp: 'Shared'
         })
       ).rejects.toThrow(/Primary entry "nonexistent" not found/);
     });
@@ -180,8 +187,9 @@ describe('rollup-plugin-iife-split', () => {
       // Use only main entry (no secondary = nothing shared)
       const result = await buildFixture('basic', {
         primary: 'main',
-        globalName: 'MyLib',
-        sharedProperty: 'Shared'
+        primaryGlobal: 'MyLib',
+        secondaryProps: { secondary: 'Secondary' },
+        sharedProp: 'Shared'
       }, ['main']);
       outputDir = result.outputDir;
 
@@ -204,8 +212,9 @@ describe('rollup-plugin-iife-split', () => {
         fixtureName: 'multi-shared',
         pluginOptions: {
           primary: 'main',
-          globalName: 'MyLib',
-          sharedProperty: 'Shared'
+          primaryGlobal: 'MyLib',
+          secondaryProps: { pageA: 'PageA', pageB: 'PageB' },
+          sharedProp: 'Shared'
         },
         entryNames: ['main', 'pageA', 'pageB']
       });
@@ -226,8 +235,9 @@ describe('rollup-plugin-iife-split', () => {
         fixtureName: 'multi-shared',
         pluginOptions: {
           primary: 'main',
-          globalName: 'MyLib',
-          sharedProperty: 'Shared'
+          primaryGlobal: 'MyLib',
+          secondaryProps: { pageA: 'PageA', pageB: 'PageB' },
+          sharedProp: 'Shared'
         },
         entryNames: ['main', 'pageA', 'pageB']
       });
@@ -251,8 +261,9 @@ describe('rollup-plugin-iife-split', () => {
         fixtureName: 'multi-shared',
         pluginOptions: {
           primary: 'main',
-          globalName: 'MyLib',
-          sharedProperty: 'Shared'
+          primaryGlobal: 'MyLib',
+          secondaryProps: { pageA: 'PageA', pageB: 'PageB' },
+          sharedProp: 'Shared'
         },
         entryNames: ['main', 'pageA', 'pageB']
       });
@@ -276,12 +287,12 @@ describe('rollup-plugin-iife-split', () => {
       vm.runInNewContext(pageACode, context);
       vm.runInNewContext(pageBCode, context);
 
-      // Verify satellites work and use shared code
-      expect(context.PageA).toBeDefined();
-      expect(context.PageB).toBeDefined();
+      // Verify satellites are attached to primary global (MyLib.PageA, MyLib.PageB)
+      expect(myLib.PageA).toBeDefined();
+      expect(myLib.PageB).toBeDefined();
 
-      const pageA = context.PageA as Record<string, unknown>;
-      const pageB = context.PageB as Record<string, unknown>;
+      const pageA = myLib.PageA as Record<string, unknown>;
+      const pageB = myLib.PageB as Record<string, unknown>;
       expect(typeof pageA.pageAFeature).toBe('function');
       expect(typeof pageB.pageBFeature).toBe('function');
 
@@ -304,8 +315,9 @@ describe('rollup-plugin-iife-split', () => {
         fixtureName: 'multi-shared',
         pluginOptions: {
           primary: 'main',
-          globalName: 'MyLib',
-          sharedProperty: 'Shared'
+          primaryGlobal: 'MyLib',
+          secondaryProps: { pageA: 'PageA', pageB: 'PageB' },
+          sharedProp: 'Shared'
         },
         entryNames: ['main', 'pageA', 'pageB']
       });
@@ -337,8 +349,9 @@ describe('rollup-plugin-iife-split', () => {
         fixtureName: 'basic',
         pluginOptions: {
           primary: 'main',
-          globalName: 'MyLib',
-          sharedProperty: 'Shared'
+          primaryGlobal: 'MyLib',
+          secondaryProps: { secondary: 'Secondary' },
+          sharedProp: 'Shared'
         },
         outputOptions: [
           {
@@ -367,8 +380,9 @@ describe('rollup-plugin-iife-split', () => {
         fixtureName: 'basic',
         pluginOptions: {
           primary: 'main',
-          globalName: 'MyLib',
-          sharedProperty: 'Shared'
+          primaryGlobal: 'MyLib',
+          secondaryProps: { secondary: 'Secondary' },
+          sharedProp: 'Shared'
         },
         rollupOptions: {
           external: ['lodash']
@@ -378,6 +392,134 @@ describe('rollup-plugin-iife-split', () => {
 
       // Should build successfully with rollupOptions passed through
       expect(result.files['main.js']).toBeDefined();
+    });
+  });
+
+  describe('secondaryProps', () => {
+    it('should attach secondary entries as properties on the primary global', async () => {
+      const result = await buildFixture('basic', {
+        primary: 'main',
+        primaryGlobal: 'MyLib',
+        secondaryProps: { secondary: 'Secondary' },
+        sharedProp: 'Shared'
+      });
+      outputDir = result.outputDir;
+
+      const secondaryCode = result.files['secondary.js'];
+
+      // Secondary should assign to MyLib.Secondary, not a top-level var
+      assertContains(secondaryCode, 'MyLib.Secondary', 'Secondary should be assigned to MyLib.Secondary');
+    });
+
+    it('should support custom property names different from entry names', async () => {
+      const result = await buildFixture('basic', {
+        primary: 'main',
+        primaryGlobal: 'MyLib',
+        secondaryProps: { secondary: 'Alt' },
+        sharedProp: 'Shared'
+      });
+      outputDir = result.outputDir;
+
+      const mainCode = result.files['main.js'];
+      const secondaryCode = result.files['secondary.js'];
+
+      // Execute and verify
+      const context: Record<string, unknown> = {};
+      vm.runInNewContext(mainCode, context);
+      vm.runInNewContext(secondaryCode, context);
+
+      const myLib = context.MyLib as Record<string, unknown>;
+      expect(myLib.Alt).toBeDefined();
+      const alt = myLib.Alt as Record<string, unknown>;
+      expect(typeof alt.secondaryFeature).toBe('function');
+    });
+
+    it('should throw if secondary entry is not in secondaryProps', async () => {
+      await expect(
+        buildFixture('basic', {
+          primary: 'main',
+          primaryGlobal: 'MyLib',
+          secondaryProps: {}, // Missing 'secondary' entry
+          sharedProp: 'Shared'
+        })
+      ).rejects.toThrow(/Secondary entry "secondary" not found in secondaryProps/);
+    });
+
+    it('should support multiple secondary entries with different property names', async () => {
+      const result = await buildFixture({
+        fixtureName: 'multi-shared',
+        pluginOptions: {
+          primary: 'main',
+          primaryGlobal: 'App',
+          secondaryProps: { pageA: 'Admin', pageB: 'Dashboard' },
+          sharedProp: 'Core'
+        },
+        entryNames: ['main', 'pageA', 'pageB']
+      });
+      outputDir = result.outputDir;
+
+      const mainCode = result.files['main.js'];
+      const pageACode = result.files['pageA.js'];
+      const pageBCode = result.files['pageB.js'];
+
+      // Execute all
+      const context: Record<string, unknown> = { Date };
+      vm.runInNewContext(mainCode, context);
+      vm.runInNewContext(pageACode, context);
+      vm.runInNewContext(pageBCode, context);
+
+      // Verify structure: App.Admin, App.Dashboard, App.Core
+      const app = context.App as Record<string, unknown>;
+      expect(app).toBeDefined();
+      expect(app.Admin).toBeDefined();
+      expect(app.Dashboard).toBeDefined();
+      expect(app.Core).toBeDefined();
+
+      // Verify functions work
+      const admin = app.Admin as Record<string, unknown>;
+      const dashboard = app.Dashboard as Record<string, unknown>;
+      expect(typeof admin.pageAFeature).toBe('function');
+      expect(typeof dashboard.pageBFeature).toBe('function');
+    });
+
+    it('should allow omitting entries with no exports from secondaryProps', async () => {
+      // The 'init' entry has no exports - just side effects
+      // It doesn't need to be in secondaryProps
+      const result = await buildFixture({
+        fixtureName: 'side-effects',
+        pluginOptions: {
+          primary: 'main',
+          primaryGlobal: 'MyLib',
+          secondaryProps: {}, // No secondary entries with exports
+          sharedProp: 'Shared'
+        },
+        entryNames: ['main', 'init']
+      });
+      outputDir = result.outputDir;
+
+      const mainCode = result.files['main.js'];
+      const initCode = result.files['init.js'];
+
+      // Both files should exist and be valid IIFEs
+      expect(mainCode).toBeDefined();
+      expect(initCode).toBeDefined();
+
+      // Primary should be an IIFE with a global
+      assertContains(mainCode, 'var MyLib', 'Primary should define global variable');
+      assertContains(mainCode, '(function', 'Primary should be wrapped in IIFE');
+
+      // Init (side-effects only) should be an IIFE without a global assignment
+      assertContains(initCode, '(function', 'Init should be wrapped in IIFE');
+
+      // Execute both - they should run without error
+      const context: Record<string, unknown> = {};
+      vm.runInNewContext(mainCode, context);
+      vm.runInNewContext(initCode, context);
+
+      // Verify primary works
+      const myLib = context.MyLib as Record<string, unknown>;
+      expect(myLib).toBeDefined();
+      expect(typeof myLib.mainFeature).toBe('function');
     });
   });
 });

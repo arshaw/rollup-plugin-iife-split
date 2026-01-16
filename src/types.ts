@@ -11,13 +11,21 @@ export interface IifeSplitOptions {
    * The global variable name for the primary entry's exports.
    * Example: 'MyLib' results in `window.MyLib = ...`
    */
-  globalName: string;
+  primaryGlobal: string;
+
+  /**
+   * Maps secondary entry names to their property name on the primary global.
+   * Example: { admin: 'Admin', widget: 'Widget' } results in:
+   *   - `window.MyLib.Admin` for the 'admin' entry
+   *   - `window.MyLib.Widget` for the 'widget' entry
+   */
+  secondaryProps: Record<string, string>;
 
   /**
    * The property name on the global where shared exports are attached.
    * Example: 'Shared' results in `window.MyLib.Shared = { ... }`
    */
-  sharedProperty: string;
+  sharedProp: string;
 }
 
 export interface ChunkAnalysis {
