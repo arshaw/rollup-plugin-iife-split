@@ -30,5 +30,10 @@
     "@types/node": "^20.0.0"
   },
   "keywords": ["rollup", "plugin", "iife", "code-splitting", "bundle"],
-  "license": "MIT"
+  "license": "MIT",
+  "homepage": "https://github.com/arshaw/rollup-plugin-iife-split",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arshaw/rollup-plugin-iife-split.git"
+  }
 }
