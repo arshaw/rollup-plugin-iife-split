@@ -39,5 +39,12 @@ export function analyzeChunks(
     chunk.isEntry && chunk.name !== primaryEntryName
   );
 
-  return { sharedChunk, primaryChunk, satelliteChunks };
+  // Non-entry, non-shared chunks are "unshared" chunks that need to be inlined
+  // These are created when a module is imported by multiple entries but was
+  // excluded from the shared chunk via the unshared option
+  const unsharedChunks = chunks.filter(chunk =>
+    !chunk.isEntry && chunk.name !== SHARED_CHUNK_NAME
+  );
+
+  return { sharedChunk, primaryChunk, satelliteChunks, unsharedChunks };
 }

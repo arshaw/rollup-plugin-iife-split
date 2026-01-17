@@ -19,6 +19,7 @@ Rollup Build (ESM)
        ▼
 ┌─────────────────┐
 │  manualChunks   │  Consolidates shared modules into __shared__ chunk
+│                 │  (unless excluded by `unshared` option)
 └────────┬────────┘
          │
          ▼
@@ -28,13 +29,20 @@ Rollup Build (ESM)
          │
          ▼
 ┌─────────────────┐
-│ analyzeChunks   │  Identifies: sharedChunk, primaryChunk, satelliteChunks
+│ analyzeChunks   │  Identifies: sharedChunk, primaryChunk, satelliteChunks,
+│                 │  and unsharedChunks (modules excluded from sharing)
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
 │ mergeShared     │  Injects shared code into primary, creates Shared export
-│ IntoPrimary     │  Uses acorn + magic-string for AST manipulation
+│ IntoPrimary     │  Uses Rollup's parser + magic-string for AST manipulation
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ mergeUnshared   │  Inlines unshared chunks into each importing entry
+│ IntoImporters   │  (duplicates code instead of sharing)
 └────────┬────────┘
          │
          ▼
@@ -54,20 +62,31 @@ Rollup Build (ESM)
 ```ts
 manualChunks: (id, { getModuleInfo }) => {
   const info = getModuleInfo(id);
-  if (info?.importers.length > 1) return '__shared__';
+  if (info?.importers.length > 1) {
+    if (unshared?.(id)) return undefined; // Let Rollup create separate chunk
+    return '__shared__';
+  }
   return undefined;
 }
 ```
 
-A module is "shared" if it has more than one importer. All shared modules go into a single `__shared__` chunk.
+A module is "shared" if it has more than one importer. All shared modules go into a single `__shared__` chunk, unless the `unshared` option excludes them.
 
 ### Chunk Merger (`chunk-merger.ts`)
 
-Uses acorn to parse ESM, extracts exports, then:
+**Shared chunk merging** (`mergeSharedIntoPrimary`):
 1. Strips `export` keywords from shared code
 2. Removes shared imports from primary
 3. Prepends shared code to primary
 4. Creates `const Shared = { exportedName: localName, ... }` object
+
+**Unshared chunk merging** (`mergeUnsharedIntoImporters`):
+1. For each unshared chunk, identifies all entries that import from it
+2. Renames all declarations with unique prefix (e.g., `messages` → `__locale_en$messages`)
+3. Inlines the renamed code into each importing entry
+4. Rewrites import references to use the new local names
+
+The unique prefix prevents conflicts when multiple unshared chunks export the same names.
 
 Handles Rollup's export aliasing (e.g., `export { foo as f }`).
 
@@ -88,6 +107,7 @@ This produces proper IIFEs where external dependencies are passed as parameters:
 Tests use vitest and build actual fixtures through the plugin:
 - `test/fixtures/basic/` - Two entries, one shared module
 - `test/fixtures/multi-shared/` - Three entries, two shared modules
+- `test/fixtures/unshared/` - Multiple locale entries testing the `unshared` option
 
 Tests execute output in Node's `vm` module to verify runtime correctness.
 

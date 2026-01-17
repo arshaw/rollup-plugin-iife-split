@@ -296,9 +296,10 @@ export async function convertToIife(options: ConvertOptions): Promise<string> {
     console.log(result.slice(0, 800));
   }
 
-  // For satellite chunks, transform to use destructuring with original names
-  // The function will extract property accesses as fallback if no mappings found
-  if (sharedGlobalPath) {
+  // For satellite chunks that import from the shared chunk, transform to use
+  // destructuring with original names. Only do this if there are actual imports
+  // from the shared chunk (importMappings.length > 0).
+  if (sharedGlobalPath && importMappings.length > 0) {
     result = stripNamespaceGuards(result);
     result = destructureSharedParameter(result, importMappings, parse);
 
@@ -307,6 +308,11 @@ export async function convertToIife(options: ConvertOptions): Promise<string> {
       console.log(result.slice(0, 800));
       console.log('=== END DEBUG ===\n');
     }
+  } else if (globalName && !globalName.includes('.')) {
+    // Primary chunk - no additional processing needed
+  } else if (globalName) {
+    // Satellite chunk with no shared imports - just strip namespace guards
+    result = stripNamespaceGuards(result);
   }
 
   return result;

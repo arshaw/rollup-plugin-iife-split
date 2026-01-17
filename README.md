@@ -104,7 +104,36 @@ MyLib.Admin = (function (exports, shared) {
 | `primaryGlobal` | `string` | Yes | Browser global variable name for the primary entry. Example: `'MyLib'` → `window.MyLib` |
 | `secondaryProps` | `Record<string, string>` | Yes | Maps secondary entry names to their property name on the primary global. Example: `{ admin: 'Admin' }` → `window.MyLib.Admin` |
 | `sharedProp` | `string` | Yes | Property name on the global where shared exports are attached. Example: `'Shared'` → `window.MyLib.Shared` |
+| `unshared` | `(id: string) => boolean` | No | Function that returns `true` for modules that should be duplicated instead of shared. See [Excluding Modules from Sharing](#excluding-modules-from-sharing). |
 | `debug` | `boolean` | No | Enable debug logging to see intermediate transformation steps. |
+
+## Excluding Modules from Sharing
+
+By default, any module imported by multiple entries is consolidated into the shared chunk (merged into primary). However, some modules should be duplicated in each entry instead—for example, locale files that should be self-contained.
+
+Use the `unshared` option to exclude specific modules from sharing:
+
+```js
+iifeSplit({
+  primary: 'main',
+  primaryGlobal: 'MyLib',
+  secondaryProps: {
+    'locale-en': 'LocaleEn',
+    'locale-fr': 'LocaleFr',
+    'locales-all': 'LocalesAll'
+  },
+  sharedProp: 'Shared',
+  unshared(id) {
+    // Locale files should be duplicated, not shared
+    return /\/locales\/[\w-]+\.js$/.test(id)
+  }
+})
+```
+
+With this configuration:
+- Locale modules matching the pattern are **duplicated** in each entry that imports them
+- They are **not** merged into the primary/shared chunk
+- Each satellite entry is self-contained with its own copy of the locale data
 
 ## How It Works
 

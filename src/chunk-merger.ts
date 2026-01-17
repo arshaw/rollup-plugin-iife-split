@@ -366,6 +366,230 @@ export function extractSharedImports(code: string, sharedChunkFileName: string, 
   return imports;
 }
 
+/**
+ * Checks if an import source refers to a specific chunk.
+ */
+function isChunkSource(source: string, chunkFileName: string): boolean {
+  // The import path might be './chunk-name.js' or './chunk-name'
+  const baseName = chunkFileName.replace(/\.js$/, '');
+  return source.includes(baseName);
+}
+
+/**
+ * Removes imports from a specific chunk and rewrites all references.
+ * Handles both namespace imports and named imports with aliasing.
+ *
+ * For named imports like `import { messages as m }`, all references to `m`
+ * are rewritten to the actual local name from the merged code.
+ *
+ * Returns the modified code with imports removed and references resolved.
+ */
+function removeChunkImportsAndRewriteRefs(
+  code: string,
+  chunkFileName: string,
+  exportToLocal: Map<string, string>,
+  parse: ParseFn
+): string {
+  const ast = parse(code) as Node;
+  const s = new MagicString(code);
+
+  // Maps for rewriting references
+  const namespaceNames = new Set<string>();
+  // Map from local alias name → actual local name in merged code
+  const namedImportRenames = new Map<string, string>();
+
+  // First pass: collect import info and build rename maps
+  walk(ast, {
+    enter(node) {
+      if (node.type === 'ImportDeclaration') {
+        const importNode = node as Node & {
+          source: { value: unknown };
+          specifiers: Array<{
+            type: string;
+            local: Identifier & { start: number; end: number };
+            imported?: Identifier;
+          }>;
+        };
+        const source = importNode.source.value;
+        if (typeof source === 'string' && isChunkSource(source, chunkFileName)) {
+          for (const spec of importNode.specifiers) {
+            if (spec.type === 'ImportNamespaceSpecifier') {
+              namespaceNames.add(spec.local.name);
+            } else if (spec.type === 'ImportSpecifier' && spec.imported) {
+              // Named import: import { exportedName as localAlias }
+              // The local alias should be renamed to the actual local name
+              const exportedName = spec.imported.name;
+              const localAlias = spec.local.name;
+              const actualLocal = exportToLocal.get(exportedName) ?? exportedName;
+
+              // Only add to rename map if they're different
+              if (localAlias !== actualLocal) {
+                namedImportRenames.set(localAlias, actualLocal);
+              }
+            } else if (spec.type === 'ImportDefaultSpecifier') {
+              // Default import: import foo from '...'
+              const localAlias = spec.local.name;
+              const actualLocal = exportToLocal.get('default') ?? '__default__';
+
+              if (localAlias !== actualLocal) {
+                namedImportRenames.set(localAlias, actualLocal);
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  // Second pass: remove imports and rewrite references
+  walk(ast, {
+    enter(node) {
+      // Remove import declarations from the chunk
+      if (node.type === 'ImportDeclaration') {
+        const importNode = node as Node & { start: number; end: number; source: { value: unknown } };
+        const source = importNode.source.value;
+        if (typeof source === 'string' && isChunkSource(source, chunkFileName)) {
+          s.remove(importNode.start, importNode.end);
+        }
+      }
+
+      // Rewrite namespace member access: namespace.foo -> localFoo
+      if (node.type === 'MemberExpression') {
+        const memberNode = node as Node & {
+          start: number;
+          end: number;
+          object: { type: string; name?: string };
+          property: { type: string; name?: string };
+          computed: boolean;
+        };
+
+        if (
+          memberNode.object.type === 'Identifier' &&
+          memberNode.object.name &&
+          namespaceNames.has(memberNode.object.name) &&
+          memberNode.property.type === 'Identifier' &&
+          memberNode.property.name &&
+          !memberNode.computed
+        ) {
+          const propertyName = memberNode.property.name;
+          const localName = exportToLocal.get(propertyName) ?? propertyName;
+          s.overwrite(memberNode.start, memberNode.end, localName);
+        }
+      }
+
+      // Rewrite named import references: oldAlias -> newLocalName
+      if (node.type === 'Identifier' && namedImportRenames.size > 0) {
+        const id = node as Identifier & { start: number; end: number };
+        const newName = namedImportRenames.get(id.name);
+        if (newName) {
+          s.overwrite(id.start, id.end, newName);
+        }
+      }
+    }
+  });
+
+  return s.toString();
+}
+
+/**
+ * Checks if a chunk imports from another chunk.
+ */
+export function chunkImportsFrom(chunk: OutputChunk, sourceChunkFileName: string): boolean {
+  // Check the imports array which lists files this chunk imports from
+  return chunk.imports.some(imp => isChunkSource(imp, sourceChunkFileName));
+}
+
+/**
+ * Merges an unshared chunk into all entry chunks that import from it.
+ *
+ * Unlike shared chunks (which are merged only into primary and exposed globally),
+ * unshared chunks are duplicated into each importing entry. The exports become
+ * local declarations in each entry.
+ *
+ * @param unsharedChunk The chunk to be inlined
+ * @param entryChunks All entry chunks (primary + satellites)
+ * @param parse Parser function
+ */
+export function mergeUnsharedIntoImporters(
+  unsharedChunk: OutputChunk,
+  entryChunks: OutputChunk[],
+  parse: ParseFn
+): void {
+  // Extract exports from the unshared chunk
+  const { exports: unsharedExports, hasDefault } = extractExports(unsharedChunk.code, parse);
+
+  // Build export-to-local mapping
+  const exportToLocal = new Map<string, string>();
+  for (const exp of unsharedExports) {
+    exportToLocal.set(exp.exportedName, exp.localName);
+  }
+  if (hasDefault) {
+    exportToLocal.set('default', '__unshared_default__');
+  }
+
+  // Strip exports from unshared code (convert to plain declarations)
+  let strippedCode = stripExports(unsharedChunk.code, parse);
+
+  // Handle default export naming
+  if (hasDefault) {
+    // stripExports already converts `export default X` to `const __shared_default__ = X`
+    // We need to update this to our unshared-specific name
+    strippedCode = strippedCode.replace(
+      /const __shared_default__ = /g,
+      'const __unshared_default__ = '
+    );
+  }
+
+  // Merge into each importing entry
+  for (const entry of entryChunks) {
+    if (!chunkImportsFrom(entry, unsharedChunk.fileName)) {
+      continue;
+    }
+
+    // Always rename inlined declarations to avoid conflicts with:
+    // 1. Existing entry declarations
+    // 2. Import aliases from other unshared chunks that will be merged later
+    // Using a unique prefix based on chunk name ensures no conflicts
+    const unsharedDeclarations = extractTopLevelDeclarations(unsharedChunk.code, parse);
+    const suffix = unsharedChunk.name.replace(/[^a-zA-Z0-9]/g, '_');
+
+    // Rename ALL declarations from the unshared chunk to unique names
+    const renameMap = new Map<string, string>();
+    for (const name of unsharedDeclarations) {
+      const newName = `__${suffix}$${name}`;
+      renameMap.set(name, newName);
+    }
+
+    // Rename identifiers in the stripped code
+    let codeToInline = strippedCode;
+    codeToInline = renameIdentifiers(codeToInline, renameMap, parse);
+
+    // Update exportToLocal with renames
+    const localExportToLocal = new Map<string, string>();
+    for (const [exportName, localName] of exportToLocal) {
+      const renamed = renameMap.get(localName) ?? localName;
+      localExportToLocal.set(exportName, renamed);
+    }
+
+    // Remove imports from the unshared chunk and rewrite references
+    const entryWithoutImports = removeChunkImportsAndRewriteRefs(
+      entry.code,
+      unsharedChunk.fileName,
+      localExportToLocal,
+      parse
+    );
+
+    // Combine: inlined code + entry code
+    entry.code = [
+      `// === Inlined from ${unsharedChunk.name} (duplicated by rollup-plugin-iife-split) ===`,
+      codeToInline.trim(),
+      '',
+      '// === Entry code ===',
+      entryWithoutImports.trim()
+    ].join('\n');
+  }
+}
+
 export function mergeSharedIntoPrimary(
   primaryChunk: OutputChunk,
   sharedChunk: OutputChunk,

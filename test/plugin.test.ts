@@ -692,6 +692,171 @@ describe('rollup-plugin-iife-split', () => {
     });
   });
 
+  describe('unshared option', () => {
+    it('should duplicate unshared modules into each importing entry', async () => {
+      const result = await buildFixture({
+        fixtureName: 'unshared',
+        pluginOptions: {
+          primary: 'main',
+          primaryGlobal: 'MyLib',
+          secondaryProps: {
+            'entry-en': 'LocaleEn',
+            'entry-fr': 'LocaleFr',
+            'locales-all': 'LocalesAll'
+          },
+          sharedProp: 'Shared',
+          unshared: (id) => /locale-\w+\.js$/.test(id)
+        },
+        entryNames: ['main', 'entry-en', 'entry-fr', 'locales-all']
+      });
+      outputDir = result.outputDir;
+
+      const fileNames = Object.keys(result.files).sort();
+
+      // Should only have 4 entry files - no extra chunk files
+      expect(fileNames).toEqual(['entry-en.js', 'entry-fr.js', 'locales-all.js', 'main.js']);
+    });
+
+    it('should NOT include unshared modules in the primary/shared chunk', async () => {
+      const result = await buildFixture({
+        fixtureName: 'unshared',
+        pluginOptions: {
+          primary: 'main',
+          primaryGlobal: 'MyLib',
+          secondaryProps: {
+            'entry-en': 'LocaleEn',
+            'entry-fr': 'LocaleFr',
+            'locales-all': 'LocalesAll'
+          },
+          sharedProp: 'Shared',
+          unshared: (id) => /locale-\w+\.js$/.test(id)
+        },
+        entryNames: ['main', 'entry-en', 'entry-fr', 'locales-all']
+      });
+      outputDir = result.outputDir;
+
+      const mainCode = result.files['main.js'];
+
+      // Primary should NOT contain locale content
+      assertNotContains(mainCode, 'Hello', 'Primary should not contain English greeting');
+      assertNotContains(mainCode, 'Bonjour', 'Primary should not contain French greeting');
+      assertNotContains(mainCode, 'Goodbye', 'Primary should not contain English farewell');
+      assertNotContains(mainCode, 'Au revoir', 'Primary should not contain French farewell');
+    });
+
+    it('should include unshared module code in each importing satellite', async () => {
+      const result = await buildFixture({
+        fixtureName: 'unshared',
+        pluginOptions: {
+          primary: 'main',
+          primaryGlobal: 'MyLib',
+          secondaryProps: {
+            'entry-en': 'LocaleEn',
+            'entry-fr': 'LocaleFr',
+            'locales-all': 'LocalesAll'
+          },
+          sharedProp: 'Shared',
+          unshared: (id) => /locale-\w+\.js$/.test(id)
+        },
+        entryNames: ['main', 'entry-en', 'entry-fr', 'locales-all']
+      });
+      outputDir = result.outputDir;
+
+      const entryEnCode = result.files['entry-en.js'];
+      const entryFrCode = result.files['entry-fr.js'];
+      const localesAllCode = result.files['locales-all.js'];
+
+      // entry-en should contain English locale
+      assertContains(entryEnCode, 'Hello', 'English entry should contain English greeting');
+      assertContains(entryEnCode, 'Goodbye', 'English entry should contain English farewell');
+      assertNotContains(entryEnCode, 'Bonjour', 'English entry should NOT contain French');
+
+      // entry-fr should contain French locale
+      assertContains(entryFrCode, 'Bonjour', 'French entry should contain French greeting');
+      assertContains(entryFrCode, 'Au revoir', 'French entry should contain French farewell');
+      assertNotContains(entryFrCode, 'Hello', 'French entry should NOT contain English');
+
+      // locales-all should contain BOTH locales (duplicated from each)
+      assertContains(localesAllCode, 'Hello', 'All locales entry should contain English');
+      assertContains(localesAllCode, 'Bonjour', 'All locales entry should contain French');
+    });
+
+    it('should produce executable code with duplicated unshared modules', async () => {
+      const result = await buildFixture({
+        fixtureName: 'unshared',
+        pluginOptions: {
+          primary: 'main',
+          primaryGlobal: 'MyLib',
+          secondaryProps: {
+            'entry-en': 'LocaleEn',
+            'entry-fr': 'LocaleFr',
+            'locales-all': 'LocalesAll'
+          },
+          sharedProp: 'Shared',
+          unshared: (id) => /locale-\w+\.js$/.test(id)
+        },
+        entryNames: ['main', 'entry-en', 'entry-fr', 'locales-all']
+      });
+      outputDir = result.outputDir;
+
+      // Execute all files
+      const context: Record<string, unknown> = {};
+      vm.runInNewContext(result.files['main.js'], context);
+      vm.runInNewContext(result.files['entry-en.js'], context);
+      vm.runInNewContext(result.files['entry-fr.js'], context);
+      vm.runInNewContext(result.files['locales-all.js'], context);
+
+      const myLib = context.MyLib as Record<string, unknown>;
+
+      // Verify primary
+      expect(myLib.createApp).toBeDefined();
+      const createApp = myLib.createApp as () => { name: string };
+      expect(createApp().name).toBe('MyApp');
+
+      // Verify English entry
+      const localeEn = myLib.LocaleEn as Record<string, () => string>;
+      expect(localeEn.greet()).toBe('Hello');
+      expect(localeEn.farewell()).toBe('Goodbye');
+
+      // Verify French entry
+      const localeFr = myLib.LocaleFr as Record<string, () => string>;
+      expect(localeFr.greet()).toBe('Bonjour');
+      expect(localeFr.farewell()).toBe('Au revoir');
+
+      // Verify all-locales entry
+      const localesAll = myLib.LocalesAll as Record<string, unknown>;
+      const getGreeting = localesAll.getGreeting as (lang: string) => string;
+      expect(getGreeting('en')).toBe('Hello');
+      expect(getGreeting('fr')).toBe('Bonjour');
+    });
+
+    it('should work when unshared modules have no shared dependencies', async () => {
+      const result = await buildFixture({
+        fixtureName: 'unshared',
+        pluginOptions: {
+          primary: 'main',
+          primaryGlobal: 'MyLib',
+          secondaryProps: {
+            'entry-en': 'LocaleEn',
+            'entry-fr': 'LocaleFr',
+            'locales-all': 'LocalesAll'
+          },
+          sharedProp: 'Shared',
+          unshared: (id) => /locale-\w+\.js$/.test(id)
+        },
+        entryNames: ['main', 'entry-en', 'entry-fr', 'locales-all']
+      });
+      outputDir = result.outputDir;
+
+      // Satellites should not need to reference MyLib.Shared since their
+      // dependencies are all inlined
+      const entryEnCode = result.files['entry-en.js'];
+
+      // Should still be valid IIFE
+      assertContains(entryEnCode, '(function', 'Should be wrapped in IIFE');
+    });
+  });
+
   describe('Shared export filtering', () => {
     it('should only include exports in Shared that satellites actually use', async () => {
       const result = await buildFixture({

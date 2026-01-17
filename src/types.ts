@@ -34,6 +34,22 @@ export interface IifeSplitOptions {
   sharedProp: string;
 
   /**
+   * A function that returns true if a module should NOT be included in the shared chunk.
+   * Unshared modules will be duplicated in each entry that imports them.
+   *
+   * This is useful for locale files or other modules that should be self-contained
+   * in each entry rather than consolidated into the primary bundle.
+   *
+   * Example:
+   * ```ts
+   * unshared(id) {
+   *   return /\/locales\/[\w-]+\.js$/.test(id)
+   * }
+   * ```
+   */
+  unshared?: (id: string) => boolean;
+
+  /**
    * Enable debug logging to see intermediate transformation steps.
    */
   debug?: boolean;
@@ -43,4 +59,6 @@ export interface ChunkAnalysis {
   sharedChunk: OutputChunk | null;
   primaryChunk: OutputChunk;
   satelliteChunks: OutputChunk[];
+  /** Non-entry, non-shared chunks that need to be inlined into their importers */
+  unsharedChunks: OutputChunk[];
 }

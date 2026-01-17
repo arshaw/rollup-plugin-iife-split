@@ -2,12 +2,12 @@ import type { Plugin, OutputOptions, GetManualChunk } from 'rollup';
 import type { IifeSplitOptions } from './types';
 import { analyzeChunks, SHARED_CHUNK_NAME } from './chunk-analyzer';
 import { convertToIife } from './esm-to-iife';
-import { mergeSharedIntoPrimary, extractSharedImports } from './chunk-merger';
+import { mergeSharedIntoPrimary, extractSharedImports, mergeUnsharedIntoImporters } from './chunk-merger';
 
 export type { IifeSplitOptions };
 
 export default function iifeSplit(options: IifeSplitOptions): Plugin {
-  const { primary, primaryGlobal, secondaryProps, sharedProp, debug } = options;
+  const { primary, primaryGlobal, secondaryProps, sharedProp, unshared, debug } = options;
 
   // Store globals from output options for use in generateBundle
   let outputGlobals: Record<string, string> = {};
@@ -23,6 +23,11 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
     // A module is "shared" if it has more than one importer
     const importers = moduleInfo.importers || [];
     if (importers.length > 1) {
+      // Check if this module should be excluded from sharing
+      // (unshared modules will be duplicated in each importing entry)
+      if (unshared?.(id)) {
+        return undefined; // Let Rollup create a separate chunk
+      }
       return SHARED_CHUNK_NAME;
     }
 
@@ -77,6 +82,16 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
 
         // Remove the shared chunk from output (it's now merged into primary)
         delete bundle[analysis.sharedChunk.fileName];
+      }
+
+      // Step 2b: Merge unshared chunks into their importing entries
+      // These are modules that were excluded from the shared chunk via the `unshared` option
+      // They get duplicated in each entry that imports them
+      const allEntries = [analysis.primaryChunk, ...analysis.satelliteChunks];
+      for (const unsharedChunk of analysis.unsharedChunks) {
+        mergeUnsharedIntoImporters(unsharedChunk, allEntries, parse);
+        // Remove the unshared chunk from output (it's now inlined into importers)
+        delete bundle[unsharedChunk.fileName];
       }
 
       // Step 3: Convert all chunks to IIFE in parallel
