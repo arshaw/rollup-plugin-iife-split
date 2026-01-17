@@ -513,7 +513,8 @@ export function chunkImportsFrom(chunk: OutputChunk, sourceChunkFileName: string
 export function mergeUnsharedIntoImporters(
   unsharedChunk: OutputChunk,
   entryChunks: OutputChunk[],
-  parse: ParseFn
+  parse: ParseFn,
+  debug?: boolean
 ): void {
   // Extract exports from the unshared chunk
   const { exports: unsharedExports, hasDefault } = extractExports(unsharedChunk.code, parse);
@@ -581,12 +582,12 @@ export function mergeUnsharedIntoImporters(
 
     // Combine: inlined code + entry code
     entry.code = [
-      `// === Inlined from ${unsharedChunk.name} (duplicated by rollup-plugin-iife-split) ===`,
+      debug && `// === Inlined from ${unsharedChunk.name} (duplicated by rollup-plugin-iife-split) ===`,
       codeToInline.trim(),
       '',
-      '// === Entry code ===',
+      debug && '// === Entry code ===',
       entryWithoutImports.trim()
-    ].join('\n');
+    ].filter(line => line !== false).join('\n');
   }
 }
 
@@ -595,7 +596,8 @@ export function mergeSharedIntoPrimary(
   sharedChunk: OutputChunk,
   sharedProperty: string,
   neededExports: Set<string>,
-  parse: ParseFn
+  parse: ParseFn,
+  debug?: boolean
 ): void {
   // Extract export information BEFORE renaming to preserve original exported names
   const { exports: sharedExports, hasDefault } = extractExports(sharedChunk.code, parse);
@@ -661,14 +663,14 @@ export function mergeSharedIntoPrimary(
 
   // Combine: shared code + primary code + shared exports
   primaryChunk.code = [
-    '// === Shared code (merged by rollup-plugin-iife-split) ===',
+    debug && '// === Shared code (merged by rollup-plugin-iife-split) ===',
     strippedSharedCode.trim(),
     '',
-    '// === Primary entry code ===',
+    debug && '// === Primary entry code ===',
     primaryWithoutSharedImports.trim(),
     '',
-    '// === Shared exports object ===',
+    debug && '// === Shared exports object ===',
     sharedExportObject,
     `export { ${sharedProperty} };`
-  ].join('\n');
+  ].filter(line => line !== false).join('\n');
 }

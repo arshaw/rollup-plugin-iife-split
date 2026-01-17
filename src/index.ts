@@ -77,7 +77,8 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
           analysis.sharedChunk,
           sharedProp,
           neededExports,
-          parse
+          parse,
+          debug
         );
 
         // Remove the shared chunk from output (it's now merged into primary)
@@ -89,7 +90,7 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
       // They get duplicated in each entry that imports them
       const allEntries = [analysis.primaryChunk, ...analysis.satelliteChunks];
       for (const unsharedChunk of analysis.unsharedChunks) {
-        mergeUnsharedIntoImporters(unsharedChunk, allEntries, parse);
+        mergeUnsharedIntoImporters(unsharedChunk, allEntries, parse, debug);
         // Remove the unshared chunk from output (it's now inlined into importers)
         delete bundle[unsharedChunk.fileName];
       }
