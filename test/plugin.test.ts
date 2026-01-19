@@ -909,4 +909,105 @@ describe('rollup-plugin-iife-split', () => {
       expect(secondary.secondaryFeature()).toBe('Secondary: shared + secondary-only');
     });
   });
+
+  describe('import alias rewriting', () => {
+    it('should handle re-exports combined with aliased imports', async () => {
+      // This tests a specific bug where:
+      // - Primary imports "BaseWidget as Widget" (adds Widget → BaseWidget to namedImportRenames)
+      // - Primary re-exports "Widget" from shared (identifier "Widget" matches the alias!)
+      // - Without this.skip(), the walker would try to overwrite "Widget" inside the
+      //   already-replaced re-export statement, causing "Cannot split a chunk" error
+      const result = await buildFixture({
+        fixtureName: 'reexport-alias',
+        pluginOptions: {
+          primary: 'main',
+          primaryGlobal: 'MyLib',
+          secondaryProps: { secondary: 'Secondary' },
+          sharedProp: 'Shared'
+        },
+        entryNames: ['main', 'secondary']
+      });
+      outputDir = result.outputDir;
+
+      const mainCode = result.files['main.js'];
+      const secondaryCode = result.files['secondary.js'];
+
+      // Both should be valid IIFEs
+      assertContains(mainCode, 'var MyLib', 'Primary should define global variable');
+      assertContains(mainCode, '(function', 'Primary should be wrapped in IIFE');
+
+      // Execute and verify both work correctly
+      const context: Record<string, unknown> = {};
+      vm.runInNewContext(mainCode, context);
+      vm.runInNewContext(secondaryCode, context);
+
+      const myLib = context.MyLib as Record<string, unknown>;
+      expect(myLib).toBeDefined();
+
+      // Test createWidget (uses imported BaseWidget via the "Widget" alias)
+      const createWidget = myLib.createWidget as (name: string) => { getName: () => string };
+      expect(createWidget('test').getName()).toBe('Base: test');
+
+      // Test re-exported SharedWidget (the actual Widget class from shared)
+      const SharedWidget = myLib.SharedWidget as new (name: string) => { getName: () => string };
+      const widget = new SharedWidget('shared-test');
+      expect(widget.getName()).toBe('Widget: shared-test');
+
+      // Test secondary
+      const secondary = myLib.Secondary as Record<string, unknown>;
+      const createSecondaryWidget = secondary.createSecondaryWidget as (name: string) => { getName: () => string };
+      expect(createSecondaryWidget('sec-test').getName()).toBe('Widget: sec-test');
+    });
+
+    it('should correctly rewrite aliased imports from shared chunk', async () => {
+      // This tests the case where:
+      // - shared exports "Calendar"
+      // - primary imports it as a different name due to local collision
+      // - Rollup creates aliased imports like { cU as Calendar$1 }
+      // - The merge must rewrite Calendar$1 -> Calendar
+      const result = await buildFixture({
+        fixtureName: 'import-alias',
+        pluginOptions: {
+          primary: 'main',
+          primaryGlobal: 'MyLib',
+          secondaryProps: { secondary: 'Secondary' },
+          sharedProp: 'Shared'
+        },
+        entryNames: ['main', 'secondary']
+      });
+      outputDir = result.outputDir;
+
+      const mainCode = result.files['main.js'];
+      const secondaryCode = result.files['secondary.js'];
+
+      // Both should be valid IIFEs
+      assertContains(mainCode, 'var MyLib', 'Primary should define global variable');
+      assertContains(mainCode, '(function', 'Primary should be wrapped in IIFE');
+      assertContains(secondaryCode, '(function', 'Secondary should be wrapped in IIFE');
+
+      // Execute and verify both work correctly
+      const context: Record<string, unknown> = {};
+      vm.runInNewContext(mainCode, context);
+      vm.runInNewContext(secondaryCode, context);
+
+      const myLib = context.MyLib as Record<string, unknown>;
+      expect(myLib).toBeDefined();
+
+      // Test that createBaseCalendar works (uses the imported class directly)
+      const createBaseCalendar = myLib.createBaseCalendar as (name: string) => { getName: () => string };
+      const baseCal = createBaseCalendar('test');
+      expect(baseCal.getName()).toBe('Base: test');
+
+      // Test that createCalendar works (uses the extended class)
+      const createCalendar = myLib.createCalendar as (name: string, extra: string) => { getFullName: () => string };
+      const cal = createCalendar('mycal', 'extra-info');
+      expect(cal.getFullName()).toBe('Base: mycal (extra-info)');
+
+      // Test secondary entry
+      const secondary = myLib.Secondary as Record<string, unknown>;
+      const createSecondaryCalendar = secondary.createSecondaryCalendar as (name: string) => { getName: () => string };
+      const secCal = createSecondaryCalendar('secondary-test');
+      expect(secCal.getName()).toBe('Base: secondary-test');
+    });
+  });
 });

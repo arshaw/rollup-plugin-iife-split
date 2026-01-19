@@ -201,7 +201,8 @@ interface ImportInfo {
  *    - Removes the import
  *    - Rewrites `shared.foo` -> `foo`
  * 2. Named imports: `import { foo, bar as baz } from './__shared__.js'`
- *    - Removes the import (the names become local from merged shared code)
+ *    - Removes the import
+ *    - Rewrites `baz` -> local name from merged shared code
  * 3. Re-exports: `export { foo } from './__shared__.js'`
  *    - Converts to `export { foo }` (removes the source)
  */
@@ -215,8 +216,10 @@ function removeSharedImportsAndRewriteRefs(
 
   const s = new MagicString(code);
 
-  // First pass: find namespace import names for the shared chunk
+  // First pass: collect import info from shared chunk
   const namespaceNames = new Set<string>();
+  // Map from local alias (e.g., 'Calendar$1') to actual local name in merged code (e.g., 'Calendar')
+  const namedImportRenames = new Map<string, string>();
 
   walk(ast, {
     enter(node) {
@@ -236,6 +239,23 @@ function removeSharedImportsAndRewriteRefs(
           for (const spec of importNode.specifiers) {
             if (spec.type === 'ImportNamespaceSpecifier') {
               namespaceNames.add(spec.local.name);
+            } else if (spec.type === 'ImportSpecifier' && spec.imported) {
+              // Named import: import { exportedName as localAlias }
+              const exportedName = spec.imported.name;
+              const localAlias = spec.local.name;
+              // Look up what the local name is in the merged shared code
+              const actualLocal = sharedExportToLocal.get(exportedName) ?? exportedName;
+              // Only add to rename map if they're different
+              if (localAlias !== actualLocal) {
+                namedImportRenames.set(localAlias, actualLocal);
+              }
+            } else if (spec.type === 'ImportDefaultSpecifier') {
+              // Default import: import foo from '...'
+              const localAlias = spec.local.name;
+              const actualLocal = sharedExportToLocal.get('default') ?? '__shared_default__';
+              if (localAlias !== actualLocal) {
+                namedImportRenames.set(localAlias, actualLocal);
+              }
             }
           }
         }
@@ -243,7 +263,7 @@ function removeSharedImportsAndRewriteRefs(
     }
   });
 
-  // Second pass: remove imports, rewrite member expressions, handle re-exports
+  // Second pass: remove imports, rewrite references, handle re-exports
   walk(ast, {
     enter(node) {
       // Remove import declarations from shared chunk
@@ -252,6 +272,7 @@ function removeSharedImportsAndRewriteRefs(
         const source = importNode.source.value;
         if (typeof source === 'string' && isSharedChunkSource(source, sharedChunkFileName)) {
           s.remove(importNode.start, importNode.end);
+          this.skip(); // Don't process children - we've removed the whole node
         }
       }
 
@@ -290,6 +311,7 @@ function removeSharedImportsAndRewriteRefs(
             }
             // Replace the entire export statement
             s.overwrite(exportNode.start, exportNode.end, `export { ${exportParts.join(', ')} };`);
+            this.skip(); // Don't process children - we've replaced the whole node
           }
         }
       }
@@ -317,6 +339,16 @@ function removeSharedImportsAndRewriteRefs(
           const localName = sharedExportToLocal.get(propertyName) ?? propertyName;
           // Replace `namespace.property` with just `localName`
           s.overwrite(memberNode.start, memberNode.end, localName);
+          this.skip(); // Don't process children - we've replaced the whole expression
+        }
+      }
+
+      // Rewrite named import references: Calendar$1 -> Calendar
+      if (node.type === 'Identifier' && namedImportRenames.size > 0) {
+        const id = node as Identifier & { start: number; end: number };
+        const newName = namedImportRenames.get(id.name);
+        if (newName) {
+          s.overwrite(id.start, id.end, newName);
         }
       }
     }
