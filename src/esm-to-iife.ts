@@ -18,7 +18,6 @@ export interface ConvertOptions {
   sharedGlobalPath: string | null;
   sharedChunkFileName: string | null;
   parse: ParseFn;
-  debug?: boolean;
 }
 
 const VIRTUAL_ENTRY = '\0virtual:entry';
@@ -235,22 +234,11 @@ function destructureSharedParameter(code: string, mappings: ImportMapping[], par
 }
 
 export async function convertToIife(options: ConvertOptions): Promise<string> {
-  const { code, globalName, globals, sharedGlobalPath, sharedChunkFileName, parse, debug } = options;
+  const { code, globalName, globals, sharedGlobalPath, sharedChunkFileName, parse } = options;
 
   // For satellite chunks, extract import mappings BEFORE IIFE conversion
   // These will be used to create destructuring parameter with nice names
   const importMappings = sharedGlobalPath ? extractSharedImportMappings(code, parse) : [];
-
-  if (debug && sharedGlobalPath) {
-    console.log('\n=== DEBUG convertToIife ===');
-    console.log('globalName:', globalName);
-    console.log('sharedGlobalPath:', sharedGlobalPath);
-    console.log('sharedChunkFileName:', sharedChunkFileName);
-    console.log('--- ESM code (first 500 chars) ---');
-    console.log(code.slice(0, 500));
-    console.log('--- Import mappings ---');
-    console.log(importMappings);
-  }
 
   // Build the globals function for Rollup
   // Use a function to flexibly match the shared chunk import regardless of exact path format
@@ -291,23 +279,12 @@ export async function convertToIife(options: ConvertOptions): Promise<string> {
 
   let result = output[0].code;
 
-  if (debug && sharedGlobalPath) {
-    console.log('--- IIFE before destructuring (first 800 chars) ---');
-    console.log(result.slice(0, 800));
-  }
-
   // For satellite chunks that import from the shared chunk, transform to use
   // destructuring with original names. Only do this if there are actual imports
   // from the shared chunk (importMappings.length > 0).
   if (sharedGlobalPath && importMappings.length > 0) {
     result = stripNamespaceGuards(result);
     result = destructureSharedParameter(result, importMappings, parse);
-
-    if (debug) {
-      console.log('--- IIFE after destructuring (first 800 chars) ---');
-      console.log(result.slice(0, 800));
-      console.log('=== END DEBUG ===\n');
-    }
   } else if (globalName && !globalName.includes('.')) {
     // Primary chunk - no additional processing needed
   } else if (globalName) {

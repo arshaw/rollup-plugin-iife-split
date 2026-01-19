@@ -50,9 +50,11 @@ export interface IifeSplitOptions {
   unshared?: (id: string) => boolean;
 
   /**
-   * Enable debug logging to see intermediate transformation steps.
+   * Directory to write intermediate files for debugging.
+   * If set, writes ESM files before IIFE conversion to help diagnose issues.
+   * Example: './debug-output'
    */
-  debug?: boolean;
+  debugDir?: string;
 }
 
 export interface ChunkAnalysis {

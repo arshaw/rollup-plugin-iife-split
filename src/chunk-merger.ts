@@ -513,8 +513,7 @@ export function chunkImportsFrom(chunk: OutputChunk, sourceChunkFileName: string
 export function mergeUnsharedIntoImporters(
   unsharedChunk: OutputChunk,
   entryChunks: OutputChunk[],
-  parse: ParseFn,
-  debug?: boolean
+  parse: ParseFn
 ): void {
   // Extract exports from the unshared chunk
   const { exports: unsharedExports, hasDefault } = extractExports(unsharedChunk.code, parse);
@@ -581,13 +580,7 @@ export function mergeUnsharedIntoImporters(
     );
 
     // Combine: inlined code + entry code
-    entry.code = [
-      debug && `// === Inlined from ${unsharedChunk.name} (duplicated by rollup-plugin-iife-split) ===`,
-      codeToInline.trim(),
-      '',
-      debug && '// === Entry code ===',
-      entryWithoutImports.trim()
-    ].filter(line => line !== false).join('\n');
+    entry.code = `${codeToInline.trim()}\n\n${entryWithoutImports.trim()}`;
   }
 }
 
@@ -596,8 +589,7 @@ export function mergeSharedIntoPrimary(
   sharedChunk: OutputChunk,
   sharedProperty: string,
   neededExports: Set<string>,
-  parse: ParseFn,
-  debug?: boolean
+  parse: ParseFn
 ): void {
   // Extract export information BEFORE renaming to preserve original exported names
   const { exports: sharedExports, hasDefault } = extractExports(sharedChunk.code, parse);
@@ -663,14 +655,11 @@ export function mergeSharedIntoPrimary(
 
   // Combine: shared code + primary code + shared exports
   primaryChunk.code = [
-    debug && '// === Shared code (merged by rollup-plugin-iife-split) ===',
     strippedSharedCode.trim(),
     '',
-    debug && '// === Primary entry code ===',
     primaryWithoutSharedImports.trim(),
     '',
-    debug && '// === Shared exports object ===',
     sharedExportObject,
     `export { ${sharedProperty} };`
-  ].filter(line => line !== false).join('\n');
+  ].join('\n');
 }

@@ -3,11 +3,25 @@ import type { IifeSplitOptions } from './types';
 import { analyzeChunks, SHARED_CHUNK_NAME } from './chunk-analyzer';
 import { convertToIife } from './esm-to-iife';
 import { mergeSharedIntoPrimary, extractSharedImports, mergeUnsharedIntoImporters } from './chunk-merger';
+import { writeFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
 
 export type { IifeSplitOptions };
 
 export default function iifeSplit(options: IifeSplitOptions): Plugin {
-  const { primary, primaryGlobal, secondaryProps, sharedProp, unshared, debug } = options;
+  const { primary, primaryGlobal, secondaryProps, sharedProp, unshared, debugDir } = options;
+
+  // Helper to write debug files
+  const sanitizeName = (name: string) => name.replace(/[/\\]/g, '-');
+  const writeDebugFile = (filename: string, content: string) => {
+    if (!debugDir) return;
+    try {
+      mkdirSync(debugDir, { recursive: true });
+      writeFileSync(join(debugDir, filename), content);
+    } catch (e) {
+      console.warn(`[iife-split] Failed to write debug file ${filename}:`, e);
+    }
+  };
 
   // Store globals from output options for use in generateBundle
   let outputGlobals: Record<string, string> = {};
@@ -59,6 +73,20 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
       // Step 1: Analyze the bundle to identify chunk types
       const analysis = analyzeChunks(bundle, primary);
 
+      // Debug: Write original ESM chunks
+      if (debugDir) {
+        writeDebugFile('1-primary-original.js', analysis.primaryChunk.code);
+        if (analysis.sharedChunk) {
+          writeDebugFile('1-shared-original.js', analysis.sharedChunk.code);
+        }
+        for (const satellite of analysis.satelliteChunks) {
+          writeDebugFile(`1-satellite-${sanitizeName(satellite.name)}-original.js`, satellite.code);
+        }
+        for (const unshared of analysis.unsharedChunks) {
+          writeDebugFile(`1-unshared-${sanitizeName(unshared.name)}-original.js`, unshared.code);
+        }
+      }
+
       // Step 2: If there's a shared chunk, merge it into primary
       const sharedChunkFileName = analysis.sharedChunk?.fileName ?? null;
 
@@ -72,17 +100,25 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
           }
         }
 
+        if (debugDir) {
+          writeDebugFile('2-needed-exports.json', JSON.stringify(Array.from(neededExports), null, 2));
+        }
+
         mergeSharedIntoPrimary(
           analysis.primaryChunk,
           analysis.sharedChunk,
           sharedProp,
           neededExports,
-          parse,
-          debug
+          parse
         );
 
         // Remove the shared chunk from output (it's now merged into primary)
         delete bundle[analysis.sharedChunk.fileName];
+      }
+
+      // Debug: Write merged ESM (after shared merge, before unshared merge)
+      if (debugDir) {
+        writeDebugFile('2-primary-after-shared-merge.js', analysis.primaryChunk.code);
       }
 
       // Step 2b: Merge unshared chunks into their importing entries
@@ -90,9 +126,17 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
       // They get duplicated in each entry that imports them
       const allEntries = [analysis.primaryChunk, ...analysis.satelliteChunks];
       for (const unsharedChunk of analysis.unsharedChunks) {
-        mergeUnsharedIntoImporters(unsharedChunk, allEntries, parse, debug);
+        mergeUnsharedIntoImporters(unsharedChunk, allEntries, parse);
         // Remove the unshared chunk from output (it's now inlined into importers)
         delete bundle[unsharedChunk.fileName];
+      }
+
+      // Debug: Write ESM after all merges, before IIFE conversion
+      if (debugDir) {
+        writeDebugFile('3-primary-before-iife.js', analysis.primaryChunk.code);
+        for (const satellite of analysis.satelliteChunks) {
+          writeDebugFile(`3-satellite-${sanitizeName(satellite.name)}-before-iife.js`, satellite.code);
+        }
       }
 
       // Step 3: Convert all chunks to IIFE in parallel
@@ -106,8 +150,7 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
           globals: outputGlobals,
           sharedGlobalPath: null, // Primary doesn't need to import shared
           sharedChunkFileName: null,
-          parse,
-          debug
+          parse
         }).then(code => {
           analysis.primaryChunk.code = code;
         })
@@ -142,8 +185,7 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
             globals: outputGlobals,
             sharedGlobalPath: `${primaryGlobal}.${sharedProp}`,
             sharedChunkFileName,
-            parse,
-            debug
+            parse
           }).then(code => {
             satellite.code = code;
           })
