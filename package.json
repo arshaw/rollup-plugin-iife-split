@@ -1,11 +1,13 @@
 {
   "name": "rollup-plugin-iife-split",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "type": "module",
   "description": "Rollup plugin for intelligent IIFE code-splitting",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "packageManager": "pnpm@9.15.4",
   "scripts": {
     "clean": "rm -rf dist",
@@ -19,17 +21,23 @@
     "rollup": "^3.0.0 || ^4.0.0"
   },
   "dependencies": {
-    "magic-string": "^0.30.0",
-    "estree-walker": "^3.0.0"
+    "estree-walker": "^3.0.0",
+    "magic-string": "^0.30.0"
   },
   "devDependencies": {
+    "@types/node": "^20.0.0",
     "rollup": "^4.0.0",
-    "typescript": "^5.0.0",
     "tsup": "^8.0.0",
-    "vitest": "^1.0.0",
-    "@types/node": "^20.0.0"
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0"
   },
-  "keywords": ["rollup", "plugin", "iife", "code-splitting", "bundle"],
+  "keywords": [
+    "rollup",
+    "plugin",
+    "iife",
+    "code-splitting",
+    "bundle"
+  ],
   "license": "MIT",
   "homepage": "https://github.com/arshaw/rollup-plugin-iife-split",
   "repository": {

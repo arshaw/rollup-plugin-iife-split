@@ -9,7 +9,7 @@ import { join } from 'path';
 export type { IifeSplitOptions };
 
 export default function iifeSplit(options: IifeSplitOptions): Plugin {
-  const { primary, primaryGlobal, secondaryProps, sharedProp, unshared, debugDir } = options;
+  const { primary, primaryGlobal, secondaryProps, sharedProp, unshared, debugDir, skipRequireGlobals } = options;
 
   // Helper to write debug files
   const sanitizeName = (name: string) => name.replace(/[/\\]/g, '-');
@@ -150,7 +150,8 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
           globals: outputGlobals,
           sharedGlobalPath: null, // Primary doesn't need to import shared
           sharedChunkFileName: null,
-          parse
+          parse,
+          skipRequireGlobals
         }).then(code => {
           analysis.primaryChunk.code = code;
         })
@@ -185,7 +186,8 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
             globals: outputGlobals,
             sharedGlobalPath: `${primaryGlobal}.${sharedProp}`,
             sharedChunkFileName,
-            parse
+            parse,
+            skipRequireGlobals
           }).then(code => {
             satellite.code = code;
           })

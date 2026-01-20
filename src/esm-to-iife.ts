@@ -18,6 +18,7 @@ export interface ConvertOptions {
   sharedGlobalPath: string | null;
   sharedChunkFileName: string | null;
   parse: ParseFn;
+  skipRequireGlobals?: boolean;
 }
 
 const VIRTUAL_ENTRY = '\0virtual:entry';
@@ -234,7 +235,7 @@ function destructureSharedParameter(code: string, mappings: ImportMapping[], par
 }
 
 export async function convertToIife(options: ConvertOptions): Promise<string> {
-  const { code, globalName, globals, sharedGlobalPath, sharedChunkFileName, parse } = options;
+  const { code, globalName, globals, sharedGlobalPath, sharedChunkFileName, parse, skipRequireGlobals } = options;
 
   // For satellite chunks, extract import mappings BEFORE IIFE conversion
   // These will be used to create destructuring parameter with nice names
@@ -242,7 +243,12 @@ export async function convertToIife(options: ConvertOptions): Promise<string> {
 
   // Build the globals function for Rollup
   // Use a function to flexibly match the shared chunk import regardless of exact path format
-  const rollupGlobals = (id: string): string => {
+  const rollupGlobals = (id: string): string | undefined => {
+    // Rollup calls globals() for the IIFE's own name - return it as-is
+    if (globalName && (id === globalName || globalName.startsWith(id + '.'))) {
+      return id;
+    }
+
     // Check if this is a shared chunk import
     if (sharedGlobalPath) {
       // Match any import that contains __shared__ (the shared chunk pattern)
@@ -258,8 +264,21 @@ export async function convertToIife(options: ConvertOptions): Promise<string> {
       }
     }
 
-    // Fall back to user-provided globals, or use id as-is
-    return globals[id] ?? id;
+    // Fall back to user-provided globals
+    const global = globals[id];
+    if (global === undefined) {
+      if (skipRequireGlobals) {
+        // Let Rollup generate a sanitized global name
+        return undefined;
+      }
+      // Error if an external doesn't have a global mapping - IIFE builds require this
+      throw new Error(
+        `[iife-split] Missing global for external "${id}". ` +
+        `IIFE builds require all externals to have a global mapping. ` +
+        `Add it to output.globals in your Rollup config, e.g.: globals: { '${id}': 'SomeGlobalName' }`
+      );
+    }
+    return global;
   };
 
   const bundle = await rollup({

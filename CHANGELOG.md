@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.0.4 (2026-01-19)
+
+### Fixed
+
+- **Duplicate external imports**: When both the primary and shared chunk import from the same external package, the merged output no longer contains duplicate import statements.
+- **External import ordering**: External imports are now correctly placed before their usage in the merged output. Previously, imports could appear after the code that used them.
+- **Empty Shared object**: The `Shared` export is no longer created when there are no shared exports needed by satellites.
+
+### Added
+
+- **`skipRequireGlobals` option**: When `false` (default), the plugin errors if an external module is missing a `globals` mapping—IIFE builds require this for correct output. Set to `true` to let Rollup auto-generate sanitized global names instead.
+
+### Changed
+
+- External modules without a `globals` mapping now throw a clear error by default, explaining how to fix it. Previously, Rollup would silently generate potentially invalid JavaScript identifiers.
+
 ## 0.0.3 (2026-01-19)
 
 ### Fixed

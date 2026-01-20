@@ -8,9 +8,6 @@ importers:
 
   .:
     dependencies:
-      acorn:
-        specifier: ^8.11.0
-        version: 8.15.0
       estree-walker:
         specifier: ^3.0.0
         version: 3.0.3

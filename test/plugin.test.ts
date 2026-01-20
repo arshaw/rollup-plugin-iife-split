@@ -199,10 +199,18 @@ describe('rollup-plugin-iife-split', () => {
       assertContains(mainCode, 'var MyLib', 'Should define global');
       assertContains(mainCode, '(function', 'Should be IIFE');
 
+      // Should NOT have an empty Shared object
+      assertNotContains(mainCode, 'const Shared', 'Should not create empty Shared object');
+      assertNotContains(mainCode, 'exports.Shared', 'Should not export empty Shared');
+
       // Execute and verify
       const context: Record<string, unknown> = {};
       vm.runInNewContext(mainCode, context);
       expect(context.MyLib).toBeDefined();
+
+      // Verify no Shared property exists
+      const myLib = context.MyLib as Record<string, unknown>;
+      expect(myLib.Shared).toBeUndefined();
     });
   });
 
@@ -907,6 +915,138 @@ describe('rollup-plugin-iife-split', () => {
       const secondary = myLib.Secondary as Record<string, () => string>;
       expect(mainFeature()).toBe('Main: shared + primary-only');
       expect(secondary.secondaryFeature()).toBe('Secondary: shared + secondary-only');
+    });
+  });
+
+  describe('duplicate external imports', () => {
+    it('should deduplicate external imports when both primary and shared import the same symbol', async () => {
+      const result = await buildFixture({
+        fixtureName: 'external-dupe',
+        pluginOptions: {
+          primary: 'main',
+          primaryGlobal: 'MyLib',
+          secondaryProps: { secondary: 'Secondary' },
+          sharedProp: 'Shared'
+        },
+        entryNames: ['main', 'secondary'],
+        rollupOptions: {
+          external: ['externalLib']
+        },
+        outputOptions: {
+          globals: {
+            externalLib: 'externalLib'
+          }
+        }
+      });
+      outputDir = result.outputDir;
+
+      const mainCode = result.files['main.js'];
+
+      // The output is IIFE format. When both primary and shared import from externalLib,
+      // the deduplication should result in only ONE external parameter, not two.
+      // The IIFE should have a single externalLib parameter, not duplicate identifiers.
+      assertContains(mainCode, '(function (exports, externalLib)', 'Should have external as IIFE parameter');
+
+      // Both sharedHelper and mainFeature should use the same externalLib reference
+      assertContains(mainCode, 'externalLib.createPlugin', 'Should use external via parameter');
+
+      // Should be valid IIFE
+      assertContains(mainCode, 'var MyLib', 'Should define global variable');
+      assertContains(mainCode, 'sharedHelper', 'Should contain shared helper function');
+      assertContains(mainCode, 'mainFeature', 'Should contain main feature function');
+
+      // Execute and verify it works
+      const context: Record<string, unknown> = {
+        externalLib: {
+          createPlugin: (name: string) => `plugin-${name}`
+        }
+      };
+      vm.runInNewContext(mainCode, context);
+
+      const myLib = context.MyLib as Record<string, unknown>;
+      expect(myLib).toBeDefined();
+      const mainFeature = myLib.mainFeature as () => string;
+      const result2 = mainFeature();
+      expect(result2).toContain('plugin-main');
+      expect(result2).toContain('plugin-shared');
+    });
+
+    it('should handle external imports used only in shared chunk', async () => {
+      const result = await buildFixture({
+        fixtureName: 'external-dupe',
+        pluginOptions: {
+          primary: 'main',
+          primaryGlobal: 'MyLib',
+          secondaryProps: { secondary: 'Secondary' },
+          sharedProp: 'Shared'
+        },
+        entryNames: ['main', 'secondary'],
+        rollupOptions: {
+          external: ['externalLib']
+        },
+        outputOptions: {
+          globals: {
+            externalLib: 'externalLib'
+          }
+        }
+      });
+      outputDir = result.outputDir;
+
+      const mainCode = result.files['main.js'];
+
+      // Build should succeed without duplicate identifier errors
+      expect(mainCode).toBeDefined();
+
+      // Should be valid code structure
+      assertContains(mainCode, '(function', 'Should be wrapped in IIFE');
+      assertContains(mainCode, 'var MyLib', 'Should define global variable');
+    });
+
+    it('should error when external is missing a global mapping', async () => {
+      await expect(
+        buildFixture({
+          fixtureName: 'external-dupe',
+          pluginOptions: {
+            primary: 'main',
+            primaryGlobal: 'MyLib',
+            secondaryProps: { secondary: 'Secondary' },
+            sharedProp: 'Shared'
+          },
+          entryNames: ['main', 'secondary'],
+          rollupOptions: {
+            external: ['externalLib']
+          }
+          // No globals provided - should error
+        })
+      ).rejects.toThrow(/Missing global for external "externalLib"/);
+    });
+
+    it('should allow missing globals when skipRequireGlobals is true', async () => {
+      const result = await buildFixture({
+        fixtureName: 'external-dupe',
+        pluginOptions: {
+          primary: 'main',
+          primaryGlobal: 'MyLib',
+          secondaryProps: { secondary: 'Secondary' },
+          sharedProp: 'Shared',
+          skipRequireGlobals: true
+        },
+        entryNames: ['main', 'secondary'],
+        rollupOptions: {
+          external: ['externalLib']
+        }
+        // No globals provided - should NOT error with skipRequireGlobals
+      });
+      outputDir = result.outputDir;
+
+      const mainCode = result.files['main.js'];
+
+      // Build should succeed
+      expect(mainCode).toBeDefined();
+      assertContains(mainCode, '(function', 'Should be wrapped in IIFE');
+      assertContains(mainCode, 'var MyLib', 'Should define global variable');
+      // Rollup should have generated a sanitized global name
+      assertContains(mainCode, 'externalLib', 'Should reference external');
     });
   });
 

@@ -105,7 +105,8 @@ MyLib.Admin = (function (exports, shared) {
 | `secondaryProps` | `Record<string, string>` | Yes | Maps secondary entry names to their property name on the primary global. Example: `{ admin: 'Admin' }` → `window.MyLib.Admin` |
 | `sharedProp` | `string` | Yes | Property name on the global where shared exports are attached. Example: `'Shared'` → `window.MyLib.Shared` |
 | `unshared` | `(id: string) => boolean` | No | Function that returns `true` for modules that should be duplicated instead of shared. See [Excluding Modules from Sharing](#excluding-modules-from-sharing). |
-| `debug` | `boolean` | No | Enable debug logging to see intermediate transformation steps. |
+| `debugDir` | `string` | No | Directory to write intermediate files for debugging. If set, writes ESM files before IIFE conversion to help diagnose issues. Example: `'./debug-output'` |
+| `skipRequireGlobals` | `boolean` | No | If `true`, don't error when an external module is missing a `globals` mapping. Instead, let Rollup auto-generate a sanitized global name. Default: `false` |
 
 ## Excluding Modules from Sharing
 
@@ -134,6 +135,27 @@ With this configuration:
 - Locale modules matching the pattern are **duplicated** in each entry that imports them
 - They are **not** merged into the primary/shared chunk
 - Each satellite entry is self-contained with its own copy of the locale data
+
+## External Dependencies
+
+When using external dependencies with IIFE output, you must specify `globals` in your Rollup output options to map module IDs to global variable names:
+
+```js
+export default {
+  input: { /* ... */ },
+  external: ['lodash', '@fullcalendar/core'],
+  plugins: [iifeSplit({ /* ... */ })],
+  output: {
+    dir: 'dist',
+    globals: {
+      'lodash': '_',
+      '@fullcalendar/core': 'FullCalendar'
+    }
+  }
+};
+```
+
+By default, the plugin will error if an external is missing from `globals`—this prevents invalid JavaScript output. If you want Rollup to auto-generate global names instead, set `skipRequireGlobals: true`.
 
 ## How It Works
 

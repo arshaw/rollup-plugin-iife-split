@@ -177,6 +177,175 @@ function stripExports(code: string, parse: ParseFn): string {
   return s.toString();
 }
 
+interface ExternalImport {
+  source: string;
+  specifiers: Array<{
+    type: 'default' | 'namespace' | 'named';
+    localName: string;
+    importedName?: string; // For named imports
+  }>;
+  fullStatement: string;
+  start: number;
+  end: number;
+}
+
+/**
+ * Extracts all external (non-relative) imports from code.
+ * Returns information about each import for deduplication purposes.
+ */
+function extractExternalImports(code: string, parse: ParseFn): ExternalImport[] {
+  const ast = parse(code) as Node;
+  const imports: ExternalImport[] = [];
+
+  walk(ast, {
+    enter(node) {
+      if (node.type === 'ImportDeclaration') {
+        const importNode = node as Node & {
+          start: number;
+          end: number;
+          source: { value: unknown };
+          specifiers: Array<{
+            type: string;
+            local: Identifier;
+            imported?: Identifier;
+          }>;
+        };
+        const source = importNode.source.value;
+        if (typeof source === 'string' && !source.startsWith('.') && !source.startsWith('/')) {
+          // This is an external import (not relative)
+          const specifiers: ExternalImport['specifiers'] = [];
+          for (const spec of importNode.specifiers) {
+            if (spec.type === 'ImportDefaultSpecifier') {
+              specifiers.push({ type: 'default', localName: spec.local.name });
+            } else if (spec.type === 'ImportNamespaceSpecifier') {
+              specifiers.push({ type: 'namespace', localName: spec.local.name });
+            } else if (spec.type === 'ImportSpecifier' && spec.imported) {
+              specifiers.push({
+                type: 'named',
+                localName: spec.local.name,
+                importedName: spec.imported.name
+              });
+            }
+          }
+          imports.push({
+            source,
+            specifiers,
+            fullStatement: code.slice(importNode.start, importNode.end),
+            start: importNode.start,
+            end: importNode.end
+          });
+        }
+      }
+    }
+  });
+
+  return imports;
+}
+
+/**
+ * Removes specific external imports from code based on source and specifier matching.
+ * Returns the modified code and a map of any local name remappings needed.
+ *
+ * When the same symbol is imported with different local names in primary vs shared,
+ * the shared code's references need to be rewritten to use the primary's local name.
+ */
+function removeOrRewriteDuplicateExternalImports(
+  sharedCode: string,
+  primaryImports: ExternalImport[],
+  parse: ParseFn
+): { code: string; renameMap: Map<string, string> } {
+  const sharedImports = extractExternalImports(sharedCode, parse);
+  const s = new MagicString(sharedCode);
+  const renameMap = new Map<string, string>();
+
+  // Build a lookup of primary imports by source
+  const primaryBySource = new Map<string, ExternalImport[]>();
+  for (const imp of primaryImports) {
+    const existing = primaryBySource.get(imp.source) || [];
+    existing.push(imp);
+    primaryBySource.set(imp.source, existing);
+  }
+
+  for (const sharedImp of sharedImports) {
+    const primaryImpsForSource = primaryBySource.get(sharedImp.source);
+    if (!primaryImpsForSource) continue;
+
+    // Check each specifier in the shared import
+    const specifiersToKeep: typeof sharedImp.specifiers = [];
+
+    for (const sharedSpec of sharedImp.specifiers) {
+      let foundInPrimary = false;
+
+      for (const primaryImp of primaryImpsForSource) {
+        for (const primarySpec of primaryImp.specifiers) {
+          // Check if same type and same imported symbol
+          if (sharedSpec.type === primarySpec.type) {
+            if (sharedSpec.type === 'named' && primarySpec.type === 'named') {
+              if (sharedSpec.importedName === primarySpec.importedName) {
+                foundInPrimary = true;
+                // If local names differ, we need to rename shared's references
+                if (sharedSpec.localName !== primarySpec.localName) {
+                  renameMap.set(sharedSpec.localName, primarySpec.localName);
+                }
+                break;
+              }
+            } else if (sharedSpec.type === 'default' && primarySpec.type === 'default') {
+              foundInPrimary = true;
+              if (sharedSpec.localName !== primarySpec.localName) {
+                renameMap.set(sharedSpec.localName, primarySpec.localName);
+              }
+              break;
+            } else if (sharedSpec.type === 'namespace' && primarySpec.type === 'namespace') {
+              foundInPrimary = true;
+              if (sharedSpec.localName !== primarySpec.localName) {
+                renameMap.set(sharedSpec.localName, primarySpec.localName);
+              }
+              break;
+            }
+          }
+        }
+        if (foundInPrimary) break;
+      }
+
+      if (!foundInPrimary) {
+        specifiersToKeep.push(sharedSpec);
+      }
+    }
+
+    // If all specifiers were found in primary, remove the entire import
+    if (specifiersToKeep.length === 0) {
+      s.remove(sharedImp.start, sharedImp.end);
+    } else if (specifiersToKeep.length < sharedImp.specifiers.length) {
+      // Some specifiers need to be kept - rebuild the import statement
+      const parts: string[] = [];
+      const namedParts: string[] = [];
+
+      for (const spec of specifiersToKeep) {
+        if (spec.type === 'default') {
+          parts.unshift(spec.localName);
+        } else if (spec.type === 'namespace') {
+          parts.push(`* as ${spec.localName}`);
+        } else if (spec.type === 'named') {
+          if (spec.importedName === spec.localName) {
+            namedParts.push(spec.localName);
+          } else {
+            namedParts.push(`${spec.importedName} as ${spec.localName}`);
+          }
+        }
+      }
+
+      if (namedParts.length > 0) {
+        parts.push(`{ ${namedParts.join(', ')} }`);
+      }
+
+      const newImport = `import ${parts.join(', ')} from '${sharedImp.source}';`;
+      s.overwrite(sharedImp.start, sharedImp.end, newImport);
+    }
+  }
+
+  return { code: s.toString(), renameMap };
+}
+
 /**
  * Checks if an import source refers to the shared chunk.
  */
@@ -626,23 +795,30 @@ export function mergeSharedIntoPrimary(
   // Extract export information BEFORE renaming to preserve original exported names
   const { exports: sharedExports, hasDefault } = extractExports(sharedChunk.code, parse);
 
+  // Deduplicate external imports: remove from PRIMARY any that already exist in SHARED.
+  // Since shared code is prepended before primary code in the final output,
+  // we keep the imports in shared (which appears first) and remove duplicates from primary.
+  const sharedExternalImports = extractExternalImports(sharedChunk.code, parse);
+  const { code: primaryCodeDeduped, renameMap: externalRenameMap } =
+    removeOrRewriteDuplicateExternalImports(primaryChunk.code, sharedExternalImports, parse);
+
   // Extract declarations from both chunks to detect collisions
   const sharedDeclarations = extractTopLevelDeclarations(sharedChunk.code, parse);
-  const primaryDeclarations = extractTopLevelDeclarations(primaryChunk.code, parse);
+  const primaryDeclarations = extractTopLevelDeclarations(primaryCodeDeduped, parse);
 
-  // Find collisions and build rename map
-  const renameMap = new Map<string, string>();
+  // Find collisions between shared and primary declarations
+  const collisionRenameMap = new Map<string, string>();
   for (const name of sharedDeclarations) {
     if (primaryDeclarations.has(name)) {
       // Collision detected - rename the shared symbol
-      renameMap.set(name, `__shared$${name}`);
+      collisionRenameMap.set(name, `__shared$${name}`);
     }
   }
 
   // Rename colliding identifiers in the shared code
   let processedSharedCode = sharedChunk.code;
-  if (renameMap.size > 0) {
-    processedSharedCode = renameIdentifiers(processedSharedCode, renameMap, parse);
+  if (collisionRenameMap.size > 0) {
+    processedSharedCode = renameIdentifiers(processedSharedCode, collisionRenameMap, parse);
   }
 
   // Strip exports from shared code (convert to plain declarations)
@@ -652,7 +828,7 @@ export function mergeSharedIntoPrimary(
   // This is used to rewrite references in the primary code
   const sharedExportToLocal = new Map<string, string>();
   for (const exp of sharedExports) {
-    const renamedLocal = renameMap.get(exp.localName) ?? exp.localName;
+    const renamedLocal = collisionRenameMap.get(exp.localName) ?? exp.localName;
     // Map the exported name to the local name (which may have been renamed)
     sharedExportToLocal.set(exp.exportedName, renamedLocal);
   }
@@ -661,21 +837,28 @@ export function mergeSharedIntoPrimary(
   }
 
   // Remove shared chunk imports from primary and rewrite all references
-  const primaryWithoutSharedImports = removeSharedImportsAndRewriteRefs(
-    primaryChunk.code,
+  // Start with the deduped primary code (external duplicates already removed)
+  let primaryWithoutSharedImports = removeSharedImportsAndRewriteRefs(
+    primaryCodeDeduped,
     sharedChunk.fileName,
     sharedExportToLocal,
     parse
   );
 
+  // Apply external rename map to primary code if needed
+  // (when shared and primary imported the same symbol with different local names)
+  if (externalRenameMap.size > 0) {
+    primaryWithoutSharedImports = renameIdentifiers(primaryWithoutSharedImports, externalRenameMap, parse);
+  }
+
   // Build the shared exports object using exportedName: localName format
   // Only include exports that are actually needed by satellites
-  // Apply rename map to localNames to reflect collision renames
+  // Apply collision rename map to localNames to reflect collision renames
   const sharedExportEntries = [
     ...sharedExports
       .filter(exp => neededExports.has(exp.exportedName))
       .map(exp => {
-        const renamedLocal = renameMap.get(exp.localName) ?? exp.localName;
+        const renamedLocal = collisionRenameMap.get(exp.localName) ?? exp.localName;
         return exp.exportedName === renamedLocal
           ? renamedLocal
           : `${exp.exportedName}: ${renamedLocal}`;
@@ -683,15 +866,18 @@ export function mergeSharedIntoPrimary(
     ...(hasDefault && neededExports.has('default') ? ['default: __shared_default__'] : [])
   ];
 
-  const sharedExportObject = `const ${sharedProperty} = { ${sharedExportEntries.join(', ')} };`;
-
-  // Combine: shared code + primary code + shared exports
-  primaryChunk.code = [
+  // Combine: shared code + primary code + shared exports (if any)
+  const parts = [
     strippedSharedCode.trim(),
     '',
-    primaryWithoutSharedImports.trim(),
-    '',
-    sharedExportObject,
-    `export { ${sharedProperty} };`
-  ].join('\n');
+    primaryWithoutSharedImports.trim()
+  ];
+
+  // Only add the Shared export if there are actual exports needed by satellites
+  if (sharedExportEntries.length > 0) {
+    const sharedExportObject = `const ${sharedProperty} = { ${sharedExportEntries.join(', ')} };`;
+    parts.push('', sharedExportObject, `export { ${sharedProperty} };`);
+  }
+
+  primaryChunk.code = parts.join('\n');
 }

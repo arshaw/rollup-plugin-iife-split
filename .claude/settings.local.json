@@ -18,7 +18,9 @@
       "Bash(npm test:*)",
       "Bash(node --input-type=module -e:*)",
       "Bash(npx vitest:*)",
-      "Bash(pnpm run typecheck:*)"
+      "Bash(pnpm run typecheck:*)",
+      "Bash(pnpm add:*)",
+      "Bash(pnpm remove:*)"
     ]
   }
 }

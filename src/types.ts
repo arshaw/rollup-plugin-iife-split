@@ -55,6 +55,13 @@ export interface IifeSplitOptions {
    * Example: './debug-output'
    */
   debugDir?: string;
+
+  /**
+   * If true, don't error when an external module is missing a global mapping.
+   * Instead, let Rollup generate a sanitized global name automatically.
+   * Default: false (errors on missing globals)
+   */
+  skipRequireGlobals?: boolean;
 }
 
 export interface ChunkAnalysis {
