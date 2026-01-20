@@ -290,7 +290,8 @@ export async function convertToIife(options: ConvertOptions): Promise<string> {
   const { output } = await bundle.generate({
     format: 'iife',
     name: globalName,
-    globals: rollupGlobals,
+    // Cast needed: Rollup's types say string, but it handles undefined by using default name generation
+    globals: rollupGlobals as (id: string) => string,
     exports: 'named'
   });
 
