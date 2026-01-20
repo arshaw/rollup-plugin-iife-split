@@ -1,4 +1,4 @@
-import type { Plugin, OutputOptions, GetManualChunk } from 'rollup';
+import type { Plugin, OutputOptions, GetManualChunk, AddonFunction } from 'rollup';
 import type { IifeSplitOptions } from './types';
 import { analyzeChunks, SHARED_CHUNK_NAME } from './chunk-analyzer';
 import { convertToIife } from './esm-to-iife';
@@ -26,6 +26,11 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
   // Store globals from output options for use in generateBundle
   let outputGlobals: Record<string, string> = {};
 
+  // Store banner/footer from output options - we intercept them so they appear
+  // outside the IIFE wrapper rather than inside it
+  let outputBanner: string | AddonFunction | undefined;
+  let outputFooter: string | AddonFunction | undefined;
+
   // Create manual chunks function to consolidate shared modules
   const manualChunks: GetManualChunk = (id, { getModuleInfo }) => {
     const moduleInfo = getModuleInfo(id);
@@ -51,17 +56,25 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
   return {
     name: 'iife-split',
 
-    // Hook into outputOptions to capture globals and configure chunking
+    // Hook into outputOptions to capture globals/banner/footer and configure chunking
     outputOptions(outputOptions: OutputOptions): OutputOptions {
       // Store globals for later use
       outputGlobals = (outputOptions.globals as Record<string, string>) ?? {};
+
+      // Capture banner/footer - we'll apply them after IIFE conversion
+      // so they appear outside the wrapper, not inside it
+      outputBanner = outputOptions.banner;
+      outputFooter = outputOptions.footer;
 
       // Force ESM format for Rollup's internal processing
       // and configure manual chunking
       return {
         ...outputOptions,
         format: 'es',
-        manualChunks
+        manualChunks,
+        // Remove banner/footer so Rollup doesn't embed them in ESM
+        banner: undefined,
+        footer: undefined
       };
     },
 
@@ -195,6 +208,35 @@ export default function iifeSplit(options: IifeSplitOptions): Plugin {
       }
 
       await Promise.all(conversions);
+
+      // Step 4: Apply banner/footer outside the IIFE wrapper
+      if (outputBanner || outputFooter) {
+        // Apply to all chunks in bundle
+        for (const chunk of Object.values(bundle)) {
+          if (chunk.type === 'chunk') {
+            // Resolve banner/footer for this chunk (call if function, await if promise)
+            const resolveBannerFooter = async (
+              value: string | AddonFunction | undefined
+            ): Promise<string> => {
+              if (value === undefined) return '';
+              if (typeof value === 'function') {
+                return await value(chunk);
+              }
+              return value;
+            };
+
+            const banner = await resolveBannerFooter(outputBanner);
+            const footer = await resolveBannerFooter(outputFooter);
+
+            if (banner) {
+              chunk.code = banner + '\n' + chunk.code;
+            }
+            if (footer) {
+              chunk.code = chunk.code + '\n' + footer;
+            }
+          }
+        }
+      }
     }
   };
 }

@@ -1050,6 +1050,170 @@ describe('rollup-plugin-iife-split', () => {
     });
   });
 
+  describe('banner and footer options', () => {
+    it('should place banner outside IIFE wrapper at the start of the file', async () => {
+      const result = await buildFixture({
+        fixtureName: 'basic',
+        pluginOptions: {
+          primary: 'main',
+          primaryGlobal: 'MyLib',
+          secondaryProps: { secondary: 'Secondary' },
+          sharedProp: 'Shared'
+        },
+        outputOptions: {
+          banner: '/* My Custom Banner */'
+        }
+      });
+      outputDir = result.outputDir;
+
+      const mainCode = result.files['main.js'];
+      const secondaryCode = result.files['secondary.js'];
+
+      // Banner should be at the very start of the file (before IIFE)
+      expect(mainCode.startsWith('/* My Custom Banner */')).toBe(true);
+      expect(secondaryCode.startsWith('/* My Custom Banner */')).toBe(true);
+
+      // Banner should appear BEFORE the IIFE declaration
+      const bannerIndex = mainCode.indexOf('/* My Custom Banner */');
+      const iifeIndex = mainCode.indexOf('var MyLib');
+      expect(bannerIndex).toBeLessThan(iifeIndex);
+
+      // Code should still be executable
+      const context: Record<string, unknown> = {};
+      vm.runInNewContext(mainCode, context);
+      expect(context.MyLib).toBeDefined();
+    });
+
+    it('should place footer outside IIFE wrapper at the end of the file', async () => {
+      const result = await buildFixture({
+        fixtureName: 'basic',
+        pluginOptions: {
+          primary: 'main',
+          primaryGlobal: 'MyLib',
+          secondaryProps: { secondary: 'Secondary' },
+          sharedProp: 'Shared'
+        },
+        outputOptions: {
+          footer: '/* My Custom Footer */'
+        }
+      });
+      outputDir = result.outputDir;
+
+      const mainCode = result.files['main.js'];
+      const secondaryCode = result.files['secondary.js'];
+
+      // Footer should be at the end of the file (after IIFE closing)
+      expect(mainCode.trimEnd().endsWith('/* My Custom Footer */')).toBe(true);
+      expect(secondaryCode.trimEnd().endsWith('/* My Custom Footer */')).toBe(true);
+
+      // Footer should appear AFTER the IIFE closing
+      const footerIndex = mainCode.indexOf('/* My Custom Footer */');
+      const iifeCloseIndex = mainCode.lastIndexOf('});');
+      expect(footerIndex).toBeGreaterThan(iifeCloseIndex);
+
+      // Code should still be executable
+      const context: Record<string, unknown> = {};
+      vm.runInNewContext(mainCode, context);
+      expect(context.MyLib).toBeDefined();
+    });
+
+    it('should support both banner and footer together', async () => {
+      const result = await buildFixture({
+        fixtureName: 'basic',
+        pluginOptions: {
+          primary: 'main',
+          primaryGlobal: 'MyLib',
+          secondaryProps: { secondary: 'Secondary' },
+          sharedProp: 'Shared'
+        },
+        outputOptions: {
+          banner: '/* START BANNER */',
+          footer: '/* END FOOTER */'
+        }
+      });
+      outputDir = result.outputDir;
+
+      const mainCode = result.files['main.js'];
+
+      // Banner at start, footer at end
+      expect(mainCode.startsWith('/* START BANNER */')).toBe(true);
+      expect(mainCode.trimEnd().endsWith('/* END FOOTER */')).toBe(true);
+
+      // Both outside the IIFE
+      const bannerIndex = mainCode.indexOf('/* START BANNER */');
+      const footerIndex = mainCode.indexOf('/* END FOOTER */');
+      const iifeStartIndex = mainCode.indexOf('var MyLib');
+      const iifeEndIndex = mainCode.lastIndexOf('});');
+
+      expect(bannerIndex).toBeLessThan(iifeStartIndex);
+      expect(footerIndex).toBeGreaterThan(iifeEndIndex);
+
+      // Code should still be executable
+      const context: Record<string, unknown> = {};
+      vm.runInNewContext(mainCode, context);
+      vm.runInNewContext(result.files['secondary.js'], context);
+
+      const myLib = context.MyLib as Record<string, unknown>;
+      expect(myLib).toBeDefined();
+      expect(myLib.Secondary).toBeDefined();
+    });
+
+    it('should support banner/footer as functions', async () => {
+      const result = await buildFixture({
+        fixtureName: 'basic',
+        pluginOptions: {
+          primary: 'main',
+          primaryGlobal: 'MyLib',
+          secondaryProps: { secondary: 'Secondary' },
+          sharedProp: 'Shared'
+        },
+        outputOptions: {
+          banner: () => '/* Function Banner */',
+          footer: () => Promise.resolve('/* Async Footer */')
+        }
+      });
+      outputDir = result.outputDir;
+
+      const mainCode = result.files['main.js'];
+
+      expect(mainCode.startsWith('/* Function Banner */')).toBe(true);
+      expect(mainCode.trimEnd().endsWith('/* Async Footer */')).toBe(true);
+
+      // Code should still be executable
+      const context: Record<string, unknown> = {};
+      vm.runInNewContext(mainCode, context);
+      expect(context.MyLib).toBeDefined();
+    });
+
+    it('should NOT include banner/footer inside the IIFE body', async () => {
+      const result = await buildFixture({
+        fixtureName: 'basic',
+        pluginOptions: {
+          primary: 'main',
+          primaryGlobal: 'MyLib',
+          secondaryProps: { secondary: 'Secondary' },
+          sharedProp: 'Shared'
+        },
+        outputOptions: {
+          banner: '/* UNIQUE_BANNER_TEXT */',
+          footer: '/* UNIQUE_FOOTER_TEXT */'
+        }
+      });
+      outputDir = result.outputDir;
+
+      const mainCode = result.files['main.js'];
+
+      // Extract just the IIFE body (between the function opening and closing)
+      const iifeStart = mainCode.indexOf('(function');
+      const iifeEnd = mainCode.lastIndexOf('});') + 3;
+      const iifeBody = mainCode.slice(iifeStart, iifeEnd);
+
+      // Banner and footer should NOT appear inside the IIFE
+      expect(iifeBody).not.toContain('/* UNIQUE_BANNER_TEXT */');
+      expect(iifeBody).not.toContain('/* UNIQUE_FOOTER_TEXT */');
+    });
+  });
+
   describe('import alias rewriting', () => {
     it('should handle re-exports combined with aliased imports', async () => {
       // This tests a specific bug where:

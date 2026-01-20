@@ -20,7 +20,9 @@
       "Bash(npx vitest:*)",
       "Bash(pnpm run typecheck:*)",
       "Bash(pnpm add:*)",
-      "Bash(pnpm remove:*)"
+      "Bash(pnpm remove:*)",
+      "Bash(npm run typecheck:*)",
+      "Bash(npx tsc:*)"
     ]
   }
 }
