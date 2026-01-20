@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.5 (2026-01-20)
+
+### Fixed
+
+- **Banner/footer placement**: `output.banner` and `output.footer` options now appear outside the IIFE wrapper instead of inside it.
+- **Merge collision with external imports**: Shared declarations no longer collide with names imported from external packages in the primary chunk (e.g., `import { globalPlugins } from 'external'` no longer conflicts with a shared `globalPlugins` variable).
+
 ## 0.0.4 (2026-01-19)
 
 ### Fixed
