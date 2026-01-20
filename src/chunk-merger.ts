@@ -71,6 +71,36 @@ function extractTopLevelDeclarations(code: string, parse: ParseFn): Set<string> 
 }
 
 /**
+ * Extracts all local binding names from external (non-relative) imports.
+ * These represent names that will be in scope after the shared chunk is merged.
+ */
+function extractExternalImportBindings(code: string, parse: ParseFn): Set<string> {
+  const ast = parse(code);
+  const bindings = new Set<string>();
+
+  for (const node of ast.body) {
+    if (node.type === 'ImportDeclaration') {
+      const importNode = node as Node & {
+        source: { value: unknown };
+        specifiers: Array<{
+          type: string;
+          local: Identifier;
+        }>;
+      };
+      const source = importNode.source.value;
+      // Only consider external imports (not relative paths)
+      if (typeof source === 'string' && !source.startsWith('.') && !source.startsWith('/')) {
+        for (const spec of importNode.specifiers) {
+          bindings.add(spec.local.name);
+        }
+      }
+    }
+  }
+
+  return bindings;
+}
+
+/**
  * Renames identifiers in code based on a rename map.
  * Handles all identifier references, not just declarations.
  */
@@ -806,10 +836,14 @@ export function mergeSharedIntoPrimary(
   const sharedDeclarations = extractTopLevelDeclarations(sharedChunk.code, parse);
   const primaryDeclarations = extractTopLevelDeclarations(primaryCodeDeduped, parse);
 
-  // Find collisions between shared and primary declarations
+  // Also extract external import bindings from primary - these are names that will
+  // be in scope and could collide with shared declarations
+  const primaryExternalBindings = extractExternalImportBindings(primaryCodeDeduped, parse);
+
+  // Find collisions between shared declarations and primary declarations/imports
   const collisionRenameMap = new Map<string, string>();
   for (const name of sharedDeclarations) {
-    if (primaryDeclarations.has(name)) {
+    if (primaryDeclarations.has(name) || primaryExternalBindings.has(name)) {
       // Collision detected - rename the shared symbol
       collisionRenameMap.set(name, `__shared$${name}`);
     }
