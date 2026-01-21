@@ -1,6 +1,6 @@
 {
   "name": "rollup-plugin-iife-split",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "type": "module",
   "description": "Rollup plugin for intelligent IIFE code-splitting",
   "main": "dist/index.js",

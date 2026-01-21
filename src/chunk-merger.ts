@@ -113,6 +113,59 @@ function renameIdentifiers(code: string, renameMap: Map<string, string>, parse: 
 
   walk(ast, {
     enter(node) {
+      // Special handling for named import specifiers - need to rewrite as "importedName as newLocalName"
+      // because the imported name must stay the same (it's the name exported by the module)
+      if (node.type === 'ImportSpecifier') {
+        const spec = node as {
+          start: number;
+          end: number;
+          imported: Identifier & { start: number; end: number };
+          local: Identifier & { start: number; end: number };
+        };
+
+        const newName = renameMap.get(spec.local.name);
+        if (newName) {
+          const importedName = spec.imported.name;
+          s.overwrite(spec.start, spec.end, `${importedName} as ${newName}`);
+        }
+        this.skip(); // Don't walk to children (imported/local identifiers)
+        return;
+      }
+
+      // Special handling for default imports - need to convert to named import syntax
+      // import foo from 'pkg' → import { default as newFoo } from 'pkg'
+      if (node.type === 'ImportDefaultSpecifier') {
+        const spec = node as {
+          start: number;
+          end: number;
+          local: Identifier & { start: number; end: number };
+        };
+
+        const newName = renameMap.get(spec.local.name);
+        if (newName) {
+          s.overwrite(spec.start, spec.end, `{ default as ${newName} }`);
+        }
+        this.skip();
+        return;
+      }
+
+      // Special handling for namespace imports - just rename the local binding
+      // import * as foo from 'pkg' → import * as newFoo from 'pkg'
+      if (node.type === 'ImportNamespaceSpecifier') {
+        const spec = node as {
+          start: number;
+          end: number;
+          local: Identifier & { start: number; end: number };
+        };
+
+        const newName = renameMap.get(spec.local.name);
+        if (newName) {
+          s.overwrite(spec.start, spec.end, `* as ${newName}`);
+        }
+        this.skip();
+        return;
+      }
+
       if (node.type === 'Identifier') {
         const id = node as Identifier & { start: number; end: number };
         const newName = renameMap.get(id.name);
@@ -840,11 +893,23 @@ export function mergeSharedIntoPrimary(
   // be in scope and could collide with shared declarations
   const primaryExternalBindings = extractExternalImportBindings(primaryCodeDeduped, parse);
 
+  // Also extract external import bindings from shared - these could collide with primary declarations
+  const sharedExternalBindings = extractExternalImportBindings(sharedChunk.code, parse);
+
   // Find collisions between shared declarations and primary declarations/imports
   const collisionRenameMap = new Map<string, string>();
   for (const name of sharedDeclarations) {
     if (primaryDeclarations.has(name) || primaryExternalBindings.has(name)) {
       // Collision detected - rename the shared symbol
+      collisionRenameMap.set(name, `__shared$${name}`);
+    }
+  }
+
+  // Also check shared import bindings vs primary declarations and primary import bindings
+  // (the latter handles cases where both import different packages with the same local name)
+  for (const name of sharedExternalBindings) {
+    if ((primaryDeclarations.has(name) || primaryExternalBindings.has(name)) && !collisionRenameMap.has(name)) {
+      // Collision detected - rename the shared import binding
       collisionRenameMap.set(name, `__shared$${name}`);
     }
   }

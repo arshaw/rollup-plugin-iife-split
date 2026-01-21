@@ -368,6 +368,161 @@ export function getCalendar() {
       // External import should remain
       expect(primaryChunk.code).toContain("import { Calendar } from '@fullcalendar/core'");
     });
+
+    it('should rename shared external import that collides with primary declaration', () => {
+      // Bug scenario: shared imports a name from external package,
+      // but primary has a local function with the same name
+      const primaryChunk = createChunk('main', `
+import { useShared } from './__shared__.js';
+
+function parseBusinessHours(input, context) {
+  return 'local: ' + input;
+}
+
+export function mainFeature() {
+  return parseBusinessHours('test') + useShared();
+}
+`);
+
+      const sharedChunk = createChunk('__shared__', `
+import { parseBusinessHours } from '@fullcalendar/preact/protected-api';
+
+export function useShared() {
+  return parseBusinessHours('shared-input');
+}
+`);
+
+      const neededExports = new Set(['useShared']);
+
+      mergeSharedIntoPrimary(primaryChunk, sharedChunk, 'Shared', neededExports, parseFn);
+
+      // The shared's external import binding should be renamed to avoid collision
+      expect(primaryChunk.code).toContain(
+        "import { parseBusinessHours as __shared$parseBusinessHours } from '@fullcalendar/preact/protected-api'"
+      );
+
+      // Primary's local function should remain unchanged
+      expect(primaryChunk.code).toContain("function parseBusinessHours(input, context)");
+
+      // Shared code should reference the renamed import
+      expect(primaryChunk.code).toContain("__shared$parseBusinessHours('shared-input')");
+
+      // Primary code should still use its local function
+      expect(primaryChunk.code).toContain("parseBusinessHours('test')");
+
+      // Should NOT have duplicate identifier error (both names coexist)
+      const parseBusinessHoursCount = (primaryChunk.code.match(/function parseBusinessHours\(/g) || []).length;
+      expect(parseBusinessHoursCount).toBe(1); // Only the primary's function declaration
+    });
+
+    it('should rename shared external import with alias that collides with primary declaration', () => {
+      // The shared chunk imports with an alias that happens to match a primary declaration
+      const primaryChunk = createChunk('main', `
+import { useShared } from './__shared__.js';
+
+const helper = 'primary-helper';
+
+export function mainFeature() {
+  return helper + useShared();
+}
+`);
+
+      const sharedChunk = createChunk('__shared__', `
+import { someFunction as helper } from 'external-lib';
+
+export function useShared() {
+  return helper();
+}
+`);
+
+      const neededExports = new Set(['useShared']);
+
+      mergeSharedIntoPrimary(primaryChunk, sharedChunk, 'Shared', neededExports, parseFn);
+
+      // The shared's import alias should be renamed
+      expect(primaryChunk.code).toContain(
+        "import { someFunction as __shared$helper } from 'external-lib'"
+      );
+
+      // Primary's local const should remain unchanged
+      expect(primaryChunk.code).toContain("const helper = 'primary-helper'");
+
+      // Shared code should reference the renamed alias
+      expect(primaryChunk.code).toContain('__shared$helper()');
+    });
+
+    it('should rename shared external import that collides with primary external import from different source', () => {
+      // Both chunks import the same local name from DIFFERENT packages
+      const primaryChunk = createChunk('main', `
+import dayGridPlugin from '@fullcalendar/web-component/daygrid';
+import { useShared } from './__shared__.js';
+
+export function mainFeature() {
+  return dayGridPlugin.name + useShared();
+}
+`);
+
+      const sharedChunk = createChunk('__shared__', `
+import dayGridPlugin from '@fullcalendar/preact/daygrid';
+
+export function useShared() {
+  return dayGridPlugin.version;
+}
+`);
+
+      const neededExports = new Set(['useShared']);
+
+      mergeSharedIntoPrimary(primaryChunk, sharedChunk, 'Shared', neededExports, parseFn);
+
+      // The shared's default import should be renamed
+      expect(primaryChunk.code).toContain(
+        "import { default as __shared$dayGridPlugin } from '@fullcalendar/preact/daygrid'"
+      );
+
+      // Primary's import should remain unchanged
+      expect(primaryChunk.code).toContain("import dayGridPlugin from '@fullcalendar/web-component/daygrid'");
+
+      // Primary code should use its own dayGridPlugin
+      expect(primaryChunk.code).toContain('dayGridPlugin.name');
+
+      // Shared code should reference the renamed import
+      expect(primaryChunk.code).toContain('__shared$dayGridPlugin.version');
+    });
+
+    it('should rename shared named import that collides with primary named import from different source', () => {
+      // Both chunks import the same named export from DIFFERENT packages
+      const primaryChunk = createChunk('main', `
+import { formatDate } from 'date-fns';
+import { useShared } from './__shared__.js';
+
+export function mainFeature() {
+  return formatDate(new Date(), 'yyyy') + useShared();
+}
+`);
+
+      const sharedChunk = createChunk('__shared__', `
+import { formatDate } from 'moment';
+
+export function useShared() {
+  return formatDate('YYYY');
+}
+`);
+
+      const neededExports = new Set(['useShared']);
+
+      mergeSharedIntoPrimary(primaryChunk, sharedChunk, 'Shared', neededExports, parseFn);
+
+      // The shared's import should be renamed
+      expect(primaryChunk.code).toContain(
+        "import { formatDate as __shared$formatDate } from 'moment'"
+      );
+
+      // Primary's import should remain unchanged
+      expect(primaryChunk.code).toContain("import { formatDate } from 'date-fns'");
+
+      // Shared code should reference the renamed import
+      expect(primaryChunk.code).toContain("__shared$formatDate('YYYY')");
+    });
   });
 
   describe('extractSharedImports', () => {

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.6 (2026-01-20)
+
+### Fixed
+
+- **Shared import collisions with primary declarations**: When the shared chunk imports a name from an external package that matches a local declaration in the primary chunk, the import is now correctly renamed (e.g., shared imports `parseBusinessHours` from external, primary defines local `parseBusinessHours` function).
+- **Shared import collisions with primary imports**: When both chunks import the same local name from different packages, the shared import is now correctly renamed (e.g., shared imports `dayGridPlugin` from `@fullcalendar/preact/daygrid`, primary imports `dayGridPlugin` from `@fullcalendar/web-component/daygrid`).
+
 ## 0.0.5 (2026-01-20)
 
 ### Fixed
