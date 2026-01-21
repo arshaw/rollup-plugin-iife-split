@@ -116,7 +116,7 @@ function renameIdentifiers(code: string, renameMap: Map<string, string>, parse: 
       // Special handling for named import specifiers - need to rewrite as "importedName as newLocalName"
       // because the imported name must stay the same (it's the name exported by the module)
       if (node.type === 'ImportSpecifier') {
-        const spec = node as {
+        const spec = node as Node & {
           start: number;
           end: number;
           imported: Identifier & { start: number; end: number };
@@ -135,7 +135,7 @@ function renameIdentifiers(code: string, renameMap: Map<string, string>, parse: 
       // Special handling for default imports - need to convert to named import syntax
       // import foo from 'pkg' → import { default as newFoo } from 'pkg'
       if (node.type === 'ImportDefaultSpecifier') {
-        const spec = node as {
+        const spec = node as Node & {
           start: number;
           end: number;
           local: Identifier & { start: number; end: number };
@@ -152,7 +152,7 @@ function renameIdentifiers(code: string, renameMap: Map<string, string>, parse: 
       // Special handling for namespace imports - just rename the local binding
       // import * as foo from 'pkg' → import * as newFoo from 'pkg'
       if (node.type === 'ImportNamespaceSpecifier') {
-        const spec = node as {
+        const spec = node as Node & {
           start: number;
           end: number;
           local: Identifier & { start: number; end: number };
